@@ -1,0 +1,19 @@
+# Local environment and secrets
+backend/.env
+
+# Local runtime data
+backend/data.db
+backend/__pycache__/
+*.py[cod]
+
+# Local Mosquitto runtime files
+mosquitto/passwd.txt
+mosquitto/data/
+mosquitto/log/
+*.log
+
+# Editor and OS files
+.vscode/*
+!.vscode/settings.json
+Thumbs.db
+Desktop.ini
