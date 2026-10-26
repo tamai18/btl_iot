@@ -29,7 +29,6 @@ const api = {
   logs:        (p={})  => api.get('/api/logs?'    + new URLSearchParams(p)),
   controlLogs: (p={})  => api.get('/api/control_logs?' + new URLSearchParams(p)),
   config:      ()      => api.get('/api/config'),
-  resolveAlert:(id, note='') => api.post(`/api/alerts/${id}/resolve`, { note }),
   control:     (command, payload) => api.post('/api/control', { command, payload }),
   saveConfig:  (data)  => api.post('/api/config', data),
 };
@@ -59,15 +58,18 @@ const demo = {
       total_records: 1245,
     };
   },
-  sensor(minutes = 30) {
+  sensor(params = {}) {
+    const minutes = Number(params.minutes || 30);
+    const pointMap = { 30: 180, 60: 120, 360: 120, 10080: 168, 43200: 120 };
+    const points = pointMap[minutes] || Math.min(Number(params.limit) || 50, 500);
     const rows = [];
     const now = Date.now();
     let lvl = 36.7;
-    for (let i = minutes; i >= 0; i -= 2) {
+    for (let i = 0; i < points; i++) {
       lvl += (Math.random() - 0.3) * 2.5;
       lvl  = Math.max(5, Math.min(95, lvl));
       rows.push({
-        recorded_at: new Date(now - i * 60000).toISOString().slice(0,19),
+        recorded_at: new Date(now - (points - 1 - i) * (minutes * 60000 / Math.max(points - 1, 1))).toISOString().slice(0,19),
         water_level: +lvl.toFixed(1),
         distance_cm: +(100 - lvl * 0.9).toFixed(1),
         pump_in:  lvl < 35 ? 1 : 0,
@@ -83,7 +85,7 @@ const demo = {
       stats_24h: { DANGER:1, WARNING:3, INFO:12 },
       total: 45, page:1, limit:20,
       data: [
-        { id:1, created_at:'2025-10-22 21:40:12', alert_code:'HIGH_LEVEL', message:'Mực nước đạt 92% (nguy cơ tràn ao)', severity:'DANGER', water_level:92, value_str:'92 %', status:'PENDING' },
+        { id:1, created_at:'2025-10-22 21:40:12', alert_code:'HIGH_LEVEL', message:'Mực nước đạt 92% (nguy cơ tràn ao)', severity:'DANGER', water_level:92, value_str:'92 %', status:'UNRESOLVED' },
         { id:2, created_at:'2025-10-22 21:35:08', alert_code:'PUMP_IN_OFF', message:'Máy bơm cấp đã tắt', severity:'WARNING', water_level:null, value_str:null, status:'RESOLVED' },
         { id:3, created_at:'2025-10-22 21:20:15', alert_code:'MODE', message:'Chế độ MANUAL được kích hoạt', severity:'INFO', water_level:null, value_str:null, status:'RESOLVED' },
         { id:4, created_at:'2025-10-22 20:40:12', alert_code:'HIGH_TREND', message:'Mực nước tăng nhanh', severity:'WARNING', water_level:65, value_str:'+5.2 %/h', status:'RESOLVED' },
@@ -158,7 +160,6 @@ window.safeAPI = {
   logs:        (p)     => safeCall(api.logs,        demo.logs,   p),
   controlLogs: (p)     => safeCall(api.controlLogs, demo.controlLogs, p),
   config:      ()      => safeCall(api.config,      demo.config),
-  resolveAlert:(id,n)  => safeCall(()=>api.resolveAlert(id,n), ()=>({ok:true})),
   control:     (c,p)   => safeCall(()=>api.control(c,p), ()=>({ok:true,command:c,payload:p})),
   saveConfig:  (d)     => safeCall(()=>api.saveConfig(d), ()=>({ok:true})),
 };

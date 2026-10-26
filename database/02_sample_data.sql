@@ -40,7 +40,7 @@ FROM sensor_data;
 -- Dữ liệu mẫu: alerts
 -- ============================================================================
 INSERT INTO alerts (created_at, alert_code, message, severity, water_level, value_str, status, resolved_at, resolved_by) VALUES
-(NOW() - INTERVAL 5 MINUTE,  'HIGH_LEVEL',   'Mực nước đạt 92% (nguy cơ tràn ao)', 'DANGER',  92.0, '92 %',   'PENDING',  NULL, NULL),
+(NOW() - INTERVAL 5 MINUTE,  'HIGH_LEVEL',   'Mực nước đạt 92% (nguy cơ tràn ao)', 'DANGER',  92.0, '92 %',   'UNRESOLVED',  NULL, NULL),
 (NOW() - INTERVAL 25 MINUTE, 'PUMP_IN_OFF',  'Máy bơm cấp đã tắt',                 'WARNING', 50.5, NULL,     'RESOLVED', NOW() - INTERVAL 20 MINUTE, 'system'),
 (NOW() - INTERVAL 45 MINUTE, 'MODE',         'Chế độ MANUAL được kích hoạt',        'INFO',    43.2, NULL,     'RESOLVED', NOW() - INTERVAL 40 MINUTE, 'system'),
 (NOW() - INTERVAL 2 HOUR,    'HIGH_TREND',   'Mực nước tăng nhanh',                 'WARNING', 65.0, '+5.2 %/h','RESOLVED', NOW() - INTERVAL 90 MINUTE, 'system'),

@@ -64,7 +64,7 @@ CREATE TABLE IF NOT EXISTS alerts (
     water_level FLOAT           NULL COMMENT 'Mực nước lúc cảnh báo (%)',
     value_str   VARCHAR(64)     NULL COMMENT 'Giá trị bổ sung',
 
-    status      ENUM('PENDING','RESOLVED') NOT NULL DEFAULT 'PENDING',
+    status      ENUM('UNRESOLVED','RESOLVED') NOT NULL DEFAULT 'UNRESOLVED',
     resolved_at DATETIME(3)     NULL,
     resolved_by VARCHAR(64)     NULL,
     note        TEXT            NULL,

@@ -110,23 +110,37 @@ function renderPagination(containerId, currentPg, totalPages, onClickFn) {
 }
 
 // ── Chart options helper ──────────────────────────────────────────────────────
-function chartOptions({ yLabel = '', yMin = 0, yMax = 100 } = {}) {
+function chartOptions({
+  yLabel = '',
+  yMin = 0,
+  yMax = 100,
+  tooltipTitle = null,
+  interaction = { mode: 'index', intersect: false },
+  legendLabels = null,
+} = {}) {
+  const tooltipCallbacks = {
+    label: ctx => ` ${ctx.dataset.label}: ${ctx.raw} %`,
+  };
+  if (tooltipTitle) tooltipCallbacks.title = tooltipTitle;
+
   return {
     responsive: true,
     maintainAspectRatio: false,
     animation: false,
+    interaction,
     plugins: {
       legend: {
         display: true,
         position: 'top',
-        labels: { boxWidth: 12, font: { size: 11 }, color: '#475569' }
+        labels: {
+          boxWidth: 12,
+          font: { size: 11 },
+          color: '#475569',
+          ...(legendLabels || {}),
+        }
       },
       tooltip: {
-        mode: 'index',
-        intersect: false,
-        callbacks: {
-          label: ctx => ` ${ctx.dataset.label}: ${ctx.raw} %`
-        }
+        callbacks: tooltipCallbacks,
       }
     },
     scales: {
@@ -143,6 +157,24 @@ function chartOptions({ yLabel = '', yMin = 0, yMax = 100 } = {}) {
       }
     }
   };
+}
+
+function createLegendLineDotIcon(color) {
+  const icon = document.createElement('canvas');
+  icon.width = 28;
+  icon.height = 12;
+  const ctx = icon.getContext('2d');
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(1, 6);
+  ctx.lineTo(27, 6);
+  ctx.stroke();
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(14, 6, 3.5, 0, Math.PI * 2);
+  ctx.fill();
+  return icon;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -196,14 +228,23 @@ async function loadOverview() {
 
     // Chart
     const rows = sensor.data || [];
-    let labels = rows.map(r => r.recorded_at ? r.recorded_at.slice(11,16) : '');
-    let data   = rows.map(r => r.water_level);
-    if (!labels.length && lvl !== undefined) {
-      labels = [new Date().toLocaleTimeString('vi').slice(0, 5)];
-      data   = [lvl];
-    }
-    const limitHigh = parseFloat(cfg.limit_high || 95);
-    const limitWarn = parseFloat(cfg.out_on_pct  || 90);
+    const overviewRecords = rows.length
+      ? rows
+      : [{
+          ...rec,
+          recorded_at: rec.recorded_at || new Date().toISOString(),
+          water_level: lvl,
+        }];
+    const chartRecords = resampleChartRecords(
+      overviewRecords,
+      { minutes: 30, chartPoints: 30 },
+      '30m'
+    );
+    const labels = chartRecords.map(record => formatChartAxisLabel(record.recorded_at, '30m'));
+    const data = chartRecords.map(record => +(record.water_level ?? 0));
+    const overviewMarkerIndexes = getChartMarkerIndexes(chartRecords, 'overview');
+    const limitHigh = 90;
+    const limitWarn = 80;
 
     const canvasEl = document.getElementById('chart-overview');
     if (canvasEl && typeof Chart !== 'undefined') {
@@ -220,27 +261,57 @@ async function loadOverview() {
                 fill: true,
                 borderColor: '#2563eb',
                 backgroundColor: 'rgba(37,99,235,0.12)',
-                tension: 0.35, pointRadius: 3, borderWidth: 2,
+                tension: 0.35,
+                pointRadius: data.map((_, index) => overviewMarkerIndexes.has(index) ? 3 : 0),
+                pointHoverRadius: data.map((_, index) => overviewMarkerIndexes.has(index) ? 5 : 0),
+                pointBackgroundColor: '#2563eb',
+                pointBorderColor: '#ffffff',
+                pointBorderWidth: 1.5,
+                pointStyle: createLegendLineDotIcon('#2563eb'),
               },
               {
-                label: `Ngưỡng nguy hiểm (≥${limitHigh}%)`,
+                label: 'Ngưỡng nguy hiểm (≥ 90%)',
                 data: Array(labels.length).fill(limitHigh),
                 borderColor: '#ef4444', borderDash: [5,3],
                 borderWidth: 1.5, pointRadius: 0, fill: false,
+                pointStyle: 'line',
               },
               {
-                label: `Ngưỡng cảnh báo (≥${limitWarn}%)`,
+                label: 'Ngưỡng cảnh báo (≥ 80%)',
                 data: Array(labels.length).fill(limitWarn),
                 borderColor: '#f59e0b', borderDash: [5,3],
                 borderWidth: 1.5, pointRadius: 0, fill: false,
+                pointStyle: 'line',
               },
             ],
           },
-          options: chartOptions({ yLabel: 'Mực nước (%)', yMax: 100 }),
+          options: {
+            ...chartOptions({
+              yLabel: 'Mực nước (%)',
+              yMax: 100,
+              interaction: { mode: 'nearest', intersect: true },
+              legendLabels: {
+                usePointStyle: true,
+                boxWidth: 32,
+                padding: 20,
+              },
+              tooltipTitle: items => {
+                const index = items[0]?.dataIndex;
+                return formatChartTimestamp(chartRecords[index]?.recorded_at)
+                  || labels[index]
+                  || '';
+              },
+            }),
+          },
+          plugins: [hoverGuideLinePlugin],
         });
       } else {
         chartOverview.data.labels = labels;
         chartOverview.data.datasets[0].data = data;
+        chartOverview.data.datasets[0].pointRadius =
+          data.map((_, index) => overviewMarkerIndexes.has(index) ? 3 : 0);
+        chartOverview.data.datasets[0].pointHoverRadius =
+          data.map((_, index) => overviewMarkerIndexes.has(index) ? 5 : 0);
         chartOverview.data.datasets[1].data = Array(labels.length).fill(limitHigh);
         chartOverview.data.datasets[2].data = Array(labels.length).fill(limitWarn);
         chartOverview.update('none');
@@ -249,11 +320,15 @@ async function loadOverview() {
     setText('ov-chart-time', `Cập nhật: ${new Date().toLocaleTimeString('vi')}`);
 
     // Latest alerts
-    const alertData = await safeAPI.alerts({ limit: 3 });
+    const [alertData, unresolvedAlerts] = await Promise.all([
+      safeAPI.alerts({ limit: 3 }),
+      safeAPI.alerts({ status: 'UNRESOLVED', limit: 200 }),
+    ]);
     renderOverviewAlerts(alertData.data || []);
 
     // Nav badge
-    const pendingCount = (alertData.data || []).filter(a => a.status === 'PENDING').length;
+    const pendingCount = unresolvedAlerts.total
+      ?? (unresolvedAlerts.data || []).length;
     const navBadge = document.getElementById('nav-badge-alert');
     navBadge.textContent = pendingCount;
     navBadge.style.display = pendingCount > 0 ? 'inline-block' : 'none';
@@ -288,26 +363,82 @@ function renderOverviewAlerts(alerts) {
 let chartWaterLevel = null;
 let chartDistance = null;
 let currentChartPeriod = '30m';
+let chartLoadRequest = 0;
+const chartPeriodConfig = {
+  '30m': { minutes: 30, chartPoints: 180, timelineMinutes: 1, timelineSlots: 30 },
+  '1h':  { minutes: 60, chartPoints: 120, timelineMinutes: 2, timelineSlots: 30 },
+  '6h':  { minutes: 360, chartPoints: 120, timelineMinutes: 10, timelineSlots: 36 },
+  '7d':  { minutes: 10080, chartPoints: 168, timelineMinutes: 360, timelineSlots: 28 },
+  '30d': { minutes: 43200, chartPoints: 120, timelineMinutes: 1440, timelineSlots: 30 },
+};
+
+const hoverGuideLinePlugin = {
+  id: 'hoverGuideLine',
+  afterDraw(chart) {
+    const active = chart.getActiveElements();
+    const activePoint = active.find(item => item.datasetIndex === 0);
+    if (!activePoint) return;
+
+    const { ctx, chartArea } = chart;
+    const x = activePoint.element.x;
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(x, chartArea.top);
+    ctx.lineTo(x, chartArea.bottom);
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = '#94a3b8';
+    ctx.setLineDash([4, 4]);
+    ctx.stroke();
+    ctx.restore();
+  },
+};
 
 async function loadChart(period = '30m') {
   currentChartPeriod = period;
+  const requestId = ++chartLoadRequest;
   try {
+    const config = chartPeriodConfig[period] || chartPeriodConfig['30m'];
     const minMap = { '30m': 30, '1h': 60, '6h': 360, '7d': 10080, '30d': 43200 };
+    const pointMap = { '30m': 180, '1h': 120, '6h': 120, '7d': 168, '30d': 120 };
+    const tickStepMap = { '30m': 5, '1h': 10, '6h': 60, '7d': 1440, '30d': 7200 };
     const mins = minMap[period] || 30;
+    const pointLimit = pointMap[period] || 180;
 
-    const [sensorData, status] = await Promise.all([
-      safeAPI.sensor({ minutes: mins, limit: 50 }),
+    const [sensorData, statsData, status] = await Promise.all([
+      safeAPI.sensor({ minutes: mins, limit: pointLimit, latest: 1 }),
+      safeAPI.sensor({ minutes: mins, limit: 2000, latest: 1 }),
       safeAPI.status(),
     ]);
 
     const records = (sensorData.data && sensorData.data.length > 0)
       ? sensorData.data
       : generateMockChartSeries(period);
+    const statsRecords = (statsData.data && statsData.data.length > 0)
+      ? statsData.data
+      : records;
+    const realtimeStatsRecords = filterRecordsToCurrentPeriod(statsRecords, config.minutes);
+    if (requestId !== chartLoadRequest || currentPage !== 'bieu-do') return;
 
     // Chuẩn bị dữ liệu hiển thị
-    const labels = records.map(r => (r.recorded_at || '').slice(11, 16) || '21:30');
-    const levels = records.map(r => +(r.water_level || 0));
-    const dists  = records.map(r => +(r.distance_cm || 0));
+    const chartRecords = resampleChartRecords(records, config, period);
+    const chartDisplayNow = new Date();
+    updateChartPeriodInfo(period, {
+      start: chartRecords[0]?.recorded_at,
+      end: chartRecords[chartRecords.length - 1]?.recorded_at,
+    });
+    const labels = chartRecords.map(r => formatChartAxisLabel(r.recorded_at, period));
+    const markerIndexes = getChartMarkerIndexes(chartRecords, period);
+    const showTick = index => markerIndexes.has(index);
+    const xTickConfig = {
+      autoSkip: false,
+      maxRotation: 0,
+      minRotation: 0,
+      font: { size: 11 },
+      color: '#64748b',
+      callback: (value, index) => showTick(index) ? labels[index] : '',
+    };
+    const levels = chartRecords.map(r => +(r.water_level || 0));
+    const dists  = chartRecords.map(r => +(r.distance_cm || 0));
 
     // 1. Biểu đồ mực nước theo thời gian
     const ctxLvl = document.getElementById('chart-water-level')?.getContext('2d');
@@ -326,7 +457,8 @@ async function loadChart(period = '30m') {
               fill: true,
               tension: 0.35,
               borderWidth: 2.2,
-              pointRadius: 4,
+              pointRadius: levels.map((_, index) => showTick(index) ? 2 : 0),
+              pointHoverRadius: 5,
               pointBackgroundColor: '#1890ff',
               pointBorderColor: '#ffffff',
               pointBorderWidth: 1.5,
@@ -354,14 +486,28 @@ async function loadChart(period = '30m') {
         options: {
           responsive: true,
           maintainAspectRatio: false,
+          interaction: { mode: 'nearest', intersect: true },
           plugins: {
             legend: { display: false },
-            tooltip: { callbacks: { label: ctx => ` ${ctx.dataset.label}: ${ctx.raw} %` } },
+            tooltip: {
+              callbacks: {
+                title: items => {
+                  const index = items[0]?.dataIndex;
+                  const record = chartRecords[index];
+                  return formatChartTooltipTimestamp(
+                    record?.recorded_at,
+                    markerIndexes.has(index),
+                    chartDisplayNow
+                  ) || labels[index] || '';
+                },
+                label: ctx => ` ${ctx.dataset.label}: ${ctx.raw} %`,
+              },
+            },
           },
           scales: {
             x: {
               grid: { color: 'rgba(0,0,0,0.04)' },
-              ticks: { font: { size: 11 }, color: '#64748b' },
+              ticks: xTickConfig,
             },
             y: {
               min: 0, max: 100,
@@ -371,6 +517,7 @@ async function loadChart(period = '30m') {
             },
           },
         },
+        plugins: [hoverGuideLinePlugin],
       });
     }
 
@@ -391,7 +538,8 @@ async function loadChart(period = '30m') {
               fill: true,
               tension: 0.35,
               borderWidth: 2.2,
-              pointRadius: 4,
+              pointRadius: dists.map((_, index) => showTick(index) ? 2 : 0),
+              pointHoverRadius: 5,
               pointBackgroundColor: '#10b981',
               pointBorderColor: '#ffffff',
               pointBorderWidth: 1.5,
@@ -419,14 +567,28 @@ async function loadChart(period = '30m') {
         options: {
           responsive: true,
           maintainAspectRatio: false,
+          interaction: { mode: 'nearest', intersect: true },
           plugins: {
             legend: { display: false },
-            tooltip: { callbacks: { label: ctx => ` ${ctx.dataset.label}: ${ctx.raw} cm` } },
+            tooltip: {
+              callbacks: {
+                title: items => {
+                  const index = items[0]?.dataIndex;
+                  const record = chartRecords[index];
+                  return formatChartTooltipTimestamp(
+                    record?.recorded_at,
+                    markerIndexes.has(index),
+                    chartDisplayNow
+                  ) || labels[index] || '';
+                },
+                label: ctx => ` ${ctx.dataset.label}: ${ctx.raw} cm`,
+              },
+            },
           },
           scales: {
             x: {
               grid: { color: 'rgba(0,0,0,0.04)' },
-              ticks: { font: { size: 11 }, color: '#64748b' },
+              ticks: xTickConfig,
             },
             y: {
               min: 0, max: 120,
@@ -436,21 +598,123 @@ async function loadChart(period = '30m') {
             },
           },
         },
+        plugins: [hoverGuideLinePlugin],
       });
     }
 
     // 3. Trạng thái máy bơm theo thời gian (Timeline)
-    renderPumpTimeline(records);
+    renderPumpTimeline(statsRecords, config);
 
     // 4. Thống kê trong khoảng thời gian
-    updateChartStats(records);
+    updateChartStats(realtimeStatsRecords);
 
   } catch (e) {
     console.error('loadChart error:', e);
   }
 }
 
-function renderPumpTimeline(records) {
+function filterRecordsToCurrentPeriod(records, minutes) {
+  const now = Date.now();
+  const since = now - minutes * 60 * 1000;
+  return records.filter(record => {
+    const timestamp = Date.parse(record.recorded_at);
+    return Number.isFinite(timestamp) && timestamp >= since && timestamp <= now;
+  });
+}
+
+function resampleChartRecords(records, config, period) {
+  const end = Date.now();
+  const start = end - config.minutes * 60 * 1000;
+  const sorted = records
+    .map(record => ({ ...record, timestamp: Date.parse(record.recorded_at) }))
+    .filter(record => Number.isFinite(record.timestamp))
+    .filter(record => record.timestamp >= start && record.timestamp <= end)
+    .sort((a, b) => a.timestamp - b.timestamp);
+  if (!sorted.length) return generateMockChartSeries(period);
+  if (sorted.length === 1) {
+    return Array.from({ length: config.chartPoints }, (_, index) => ({
+      ...sorted[0],
+      recorded_at: new Date(start + index * (end - start) / Math.max(config.chartPoints - 1, 1)).toISOString(),
+    }));
+  }
+
+  const step = (end - start) / Math.max(config.chartPoints - 1, 1);
+  return Array.from({ length: config.chartPoints }, (_, index) => {
+    const timestamp = start + index * step;
+    let right = sorted.findIndex(record => record.timestamp >= timestamp);
+    if (right < 0) right = sorted.length - 1;
+    const left = Math.max(0, right - 1);
+    const before = sorted[left];
+    const after = sorted[right];
+    const ratio = after.timestamp === before.timestamp
+      ? 0
+      : (timestamp - before.timestamp) / (after.timestamp - before.timestamp);
+    const interpolate = key => {
+      const start = Number(before[key]);
+      const end = Number(after[key]);
+      if (!Number.isFinite(start)) return after[key] ?? before[key];
+      if (!Number.isFinite(end)) return before[key];
+      return +(start + (end - start) * ratio).toFixed(2);
+    };
+    return {
+      ...before,
+      recorded_at: new Date(timestamp).toISOString(),
+      water_level: interpolate('water_level'),
+      distance_cm: interpolate('distance_cm'),
+      pump_in: ratio < 0.5 ? before.pump_in : after.pump_in,
+      pump_out: ratio < 0.5 ? before.pump_out : after.pump_out,
+    };
+  });
+}
+
+function getChartMarkerIndexes(records, period) {
+  const markerMinutes = {
+    overview: 3,
+    '30m': 5,
+    '1h': 10,
+    '6h': 60,
+    '7d': 1440,
+    '30d': 7200,
+  };
+  const intervalMs = (markerMinutes[period] || 5) * 60 * 1000;
+  const first = Date.parse(records[0]?.recorded_at);
+  const last = Date.parse(records[records.length - 1]?.recorded_at);
+  const indexes = new Set([0, records.length - 1]);
+  if (!Number.isFinite(first) || !Number.isFinite(last) || last <= first) return indexes;
+
+  for (let target = first; target <= last; target += intervalMs) {
+    let closest = 0;
+    let distance = Infinity;
+    records.forEach((record, index) => {
+      const difference = Math.abs(Date.parse(record.recorded_at) - target);
+      if (difference < distance) {
+        distance = difference;
+        closest = index;
+      }
+    });
+    indexes.add(closest);
+  }
+  return indexes;
+}
+
+function formatChartAxisLabel(timestamp, period) {
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return '--';
+  if (period === '7d' || period === '30d') {
+    return date.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' });
+  }
+  return date.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+}
+
+function formatChartRangeTimestamp(timestamp) {
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return '--';
+  const pad = value => String(value).padStart(2, '0');
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+    + ` ${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()}`;
+}
+
+function renderPumpTimeline(records, config) {
   const inTrack  = document.getElementById('track-pump-in');
   const outTrack = document.getElementById('track-pump-out');
   const axis     = document.getElementById('track-axis');
@@ -459,33 +723,207 @@ function renderPumpTimeline(records) {
   inTrack.innerHTML = '';
   outTrack.innerHTML = '';
 
-  const pts = records.slice(-14);
+  const now = Date.now();
+  const intervalMs = config.timelineMinutes * 60 * 1000;
+  const start = now - config.timelineSlots * intervalMs;
+  const pts = Array.from({ length: config.timelineSlots }, (_, index) => {
+    const bucketStart = start + index * intervalMs;
+    const bucketEnd = bucketStart + intervalMs;
+    const bucketRecords = records.filter(record => {
+      const timestamp = Date.parse(record.recorded_at);
+      return timestamp >= bucketStart && timestamp < bucketEnd;
+    });
+    return {
+      ...(bucketRecords[bucketRecords.length - 1] || {
+        pump_in: 0,
+        pump_out: 0,
+      }),
+      timelineStart: bucketStart,
+      timelineEnd: bucketEnd,
+    };
+  });
+  // The final segment represents the interval ending at the moment of display.
+  // Keep its pump state, but anchor its visible endpoint to the current time.
+  if (pts.length > 0) {
+    pts[pts.length - 1] = {
+      ...pts[pts.length - 1],
+      timelineEnd: now,
+      recorded_at: new Date(now).toISOString(),
+    };
+  }
   const segWidth = (100 / Math.max(pts.length, 1)).toFixed(2) + '%';
+  const isLongPeriod = config.minutes >= 10080;
+  const tooltip = getPumpTimelineTooltip();
 
   pts.forEach(r => {
     // Bơm IN
     const divIn = document.createElement('div');
     divIn.className = 'track-segment ' + (r.pump_in ? 'on-in' : 'off');
     divIn.style.width = segWidth;
-    divIn.title = `Bơm IN: ${r.pump_in ? 'Bật' : 'Tắt'} (${(r.recorded_at||'').slice(11,19)})`;
+    attachPumpTimelineTooltip(divIn, {
+      name: 'Bơm cấp (IN)',
+      isOn: !!r.pump_in,
+      start: r.timelineStart,
+      end: r.timelineEnd,
+      isLongPeriod,
+      tooltip,
+    });
     inTrack.appendChild(divIn);
 
     // Bơm OUT
     const divOut = document.createElement('div');
     divOut.className = 'track-segment ' + (r.pump_out ? 'on-out' : 'off');
     divOut.style.width = segWidth;
-    divOut.title = `Bơm OUT: ${r.pump_out ? 'Bật' : 'Tắt'} (${(r.recorded_at||'').slice(11,19)})`;
+    attachPumpTimelineTooltip(divOut, {
+      name: 'Bơm thoát (OUT)',
+      isOn: !!r.pump_out,
+      start: r.timelineStart,
+      end: r.timelineEnd,
+      isLongPeriod,
+      tooltip,
+    });
     outTrack.appendChild(divOut);
   });
 
   if (axis && pts.length > 0) {
     const step = Math.max(1, Math.floor(pts.length / 7));
-    const axisLabels = [];
+    const labelIndexes = [];
     for (let i = 0; i < pts.length; i += step) {
-      axisLabels.push(`<span>${(pts[i].recorded_at||'').slice(11,16)}</span>`);
+      labelIndexes.push(i);
     }
+    if (labelIndexes[labelIndexes.length - 1] !== pts.length - 1) {
+      labelIndexes.push(pts.length - 1);
+    }
+    const axisLabels = labelIndexes.map(index =>
+      `<span>${index === pts.length - 1
+        ? formatChartTime(new Date(now).toISOString())
+        : formatChartTime(pts[index].recorded_at)}</span>`
+    );
     axis.innerHTML = axisLabels.join('');
   }
+}
+
+function getPumpTimelineTooltip() {
+  let tooltip = document.getElementById('pump-timeline-tooltip');
+  if (!tooltip) {
+    tooltip = document.createElement('div');
+    tooltip.id = 'pump-timeline-tooltip';
+    tooltip.className = 'pump-timeline-tooltip';
+    tooltip.hidden = true;
+    document.body.appendChild(tooltip);
+  }
+  return tooltip;
+}
+
+function attachPumpTimelineTooltip(segment, details) {
+  const {
+    name, isOn, start, end, isLongPeriod, tooltip,
+  } = details;
+  const startDate = new Date(start);
+  const endDate = new Date(end);
+  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) return;
+
+  const durationText = formatPumpDuration(Math.max(0, end - start));
+  const lines = isLongPeriod
+    ? [
+        name,
+        `Ngày: ${formatPumpDate(startDate)}`,
+        `Thời gian bật ghi nhận: ${isOn ? durationText : '0 phút'}`,
+      ]
+    : [
+        name,
+        `Trạng thái: ${isOn ? 'Bật' : 'Tắt'}`,
+        `Bắt đầu: ${formatPumpTime(startDate)}`,
+        `Kết thúc: ${formatPumpTime(endDate)}`,
+        `Thời gian hoạt động: ${isOn ? durationText : '0 phút'}`,
+      ];
+
+  const show = event => {
+    tooltip.innerHTML = lines.map((line, index) =>
+      index === 0 ? `<strong>${line}</strong>` : `<span>${line}</span>`
+    ).join('');
+    tooltip.hidden = false;
+    move(event);
+  };
+  const move = event => {
+    tooltip.style.left = `${event.clientX + 12}px`;
+    tooltip.style.top = `${event.clientY + 12}px`;
+  };
+  const hide = () => {
+    tooltip.hidden = true;
+  };
+
+  segment.addEventListener('mouseenter', show);
+  segment.addEventListener('mousemove', move);
+  segment.addEventListener('mouseleave', hide);
+}
+
+function formatPumpTime(date) {
+  return date.toLocaleTimeString('vi-VN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  });
+}
+
+function formatPumpDate(date) {
+  return date.toLocaleDateString('vi-VN', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  });
+}
+
+function formatPumpDuration(durationMs) {
+  const totalSeconds = Math.floor(durationMs / 1000);
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const parts = [];
+  if (days) parts.push(`${days} ngày`);
+  if (hours) parts.push(`${hours} giờ`);
+  if (minutes || !parts.length) parts.push(`${minutes} phút`);
+  if (seconds && !days) parts.push(`${seconds} giây`);
+  return parts.join(' ');
+}
+
+function formatChartTime(timestamp) {
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return '--';
+  return date.toLocaleString('vi-VN', {
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function formatChartTimestamp(timestamp) {
+  if (!timestamp) return '';
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) {
+    return String(timestamp).replace('T', ' ').replace(/\.\d{3}Z?$/, '').replace(/Z$/, '');
+  }
+  const pad = value => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+    + ` ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+function formatChartTooltipTimestamp(timestamp, isMarker, displayNow) {
+  if (!isMarker) return formatChartTimestamp(timestamp);
+
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return '';
+
+  date.setHours(
+    displayNow.getHours(),
+    displayNow.getMinutes(),
+    displayNow.getSeconds(),
+    0
+  );
+  return formatChartTimestamp(date);
 }
 
 function updateChartStats(records) {
@@ -518,19 +956,24 @@ function updateChartStats(records) {
 }
 
 function generateMockChartSeries(period) {
-  const pts = 14;
+  const pointMap = { '30m': 180, '1h': 120, '6h': 120, '7d': 168, '30d': 120 };
+  const minutesMap = { '30m': 30, '1h': 60, '6h': 360, '7d': 10080, '30d': 43200 };
+  const pts = pointMap[period] || 180;
+  const totalMinutes = minutesMap[period] || 30;
   const out = [];
-  const baseLvl = [20, 26, 31, 32, 42, 43, 43, 50, 50, 50, 56, 56, 56, 57];
-  const baseDst = [35, 38, 40, 42, 38, 41, 41, 47, 46, 45, 51, 58, 58, 60];
   const now = Date.now();
   for (let i = 0; i < pts; i++) {
-    const t = new Date(now - (pts - 1 - i) * 120000);
+    const progress = i / Math.max(pts - 1, 1);
+    const t = new Date(now - (pts - 1 - i) * (totalMinutes * 60000 / Math.max(pts - 1, 1)));
+    const level = Math.max(5, Math.min(95,
+      45 + Math.sin(progress * Math.PI * 3) * 10 + (Math.random() - 0.5) * 3
+    ));
     out.push({
-      recorded_at: t.toISOString().slice(0, 19).replace('T', ' '),
-      water_level: baseLvl[i] || 45.5,
-      distance_cm: baseDst[i] || 56.7,
-      pump_in: (i >= 3 && i <= 5) || (i >= 8 && i <= 9) ? 1 : 0,
-      pump_out: (i >= 6 && i <= 7) || (i === 11) ? 1 : 0,
+      recorded_at: t.toISOString(),
+      water_level: +level.toFixed(1),
+      distance_cm: +(100 - level * 0.9).toFixed(1),
+      pump_in: level < 35 ? 1 : 0,
+      pump_out: level > 85 ? 1 : 0,
     });
   }
   return out;
@@ -539,18 +982,29 @@ function generateMockChartSeries(period) {
 function changeChartPeriod(period, btn) {
   document.querySelectorAll('#chart-period-tabs .period-pill').forEach(b => b.classList.remove('active'));
   if (btn) btn.classList.add('active');
+  updateChartPeriodInfo(period);
   loadChart(period);
 }
 
-function filterChartByDate() {
-  const from = document.getElementById('chart-date-from')?.value;
-  const to   = document.getElementById('chart-date-to')?.value;
-  if (!from || !to) {
-    toast('Vui lòng chọn cả từ ngày và đến ngày', 'warning');
-    return;
-  }
-  toast(`Đang lọc dữ liệu từ ${from} đến ${to}...`, 'info');
-  loadChart('custom');
+function updateChartPeriodInfo(period, range = null) {
+  const periodInfo = {
+    '30m': { range: '30 phút gần nhất', interval: '5 giây' },
+    '1h': { range: '1 giờ gần nhất', interval: '10 giây' },
+    '6h': { range: '6 giờ gần nhất', interval: '1 giờ' },
+    '7d': { range: '7 ngày gần nhất', interval: '1 ngày' },
+    '30d': { range: '30 ngày gần nhất', interval: '5 ngày' },
+  };
+  const selected = periodInfo[period] || periodInfo['30m'];
+  const info = document.getElementById('chart-period-info');
+  if (!info) return;
+  const rangeText = range?.start && range?.end
+    ? ` · ${formatChartRangeTimestamp(range.start)} → ${formatChartRangeTimestamp(range.end)}`
+    : '';
+  const intervalText = period === '7d' || period === '30d'
+    ? ` · Mỗi điểm trên biểu đồ là giá trị trung bình trong ${selected.interval}.`
+    : '';
+  info.innerHTML = `<span class="chart-period-info-icon">◷</span>
+    <span>Đang xem: <strong>${selected.range}</strong>${rangeText}${intervalText}</span>`;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -618,31 +1072,40 @@ async function sendPumpCmd(pump, state) {
     const res = await safeAPI.control(pump, state);
     updateFeedback(pump, state);
     const pumpName = pump === 'pump_in' ? 'bơm cấp (IN)' : 'bơm thoát (OUT)';
-    toast(`Đã gửi lệnh: ${state === 'ON' ? 'Bật' : 'Tắt'} ${pumpName}`, 'success');
+    if (res.warning) {
+      toast(`⚠️ ${res.warning}`, 'warning', 6000);
+    } else {
+      toast(`Đã gửi lệnh: ${state === 'ON' ? 'Bật' : 'Tắt'} ${pumpName}`, 'success');
+    }
     setTimeout(loadControlPage, 600);
   } catch (e) {
     toast('Lỗi khi gửi lệnh bơm', 'error');
   }
 }
 
+function showControlWarning(result) {
+  if (result?.warning) toast(`⚠️ ${result.warning}`, 'warning', 6000);
+  return result;
+}
+
 async function quickAction(action) {
   try {
     let desc = '';
     if (action === 'both_on') {
-      await safeAPI.control('pump_in', 'ON');
-      await safeAPI.control('pump_out', 'ON');
+      showControlWarning(await safeAPI.control('pump_in', 'ON'));
+      showControlWarning(await safeAPI.control('pump_out', 'ON'));
       desc = 'Bật cả hai bơm';
     } else if (action === 'both_off') {
-      await safeAPI.control('pump_in', 'OFF');
-      await safeAPI.control('pump_out', 'OFF');
+      showControlWarning(await safeAPI.control('pump_in', 'OFF'));
+      showControlWarning(await safeAPI.control('pump_out', 'OFF'));
       desc = 'Tắt cả hai bơm';
     } else if (action === 'in_on') {
-      await safeAPI.control('pump_in', 'ON');
-      await safeAPI.control('pump_out', 'OFF');
+      showControlWarning(await safeAPI.control('pump_in', 'ON'));
+      showControlWarning(await safeAPI.control('pump_out', 'OFF'));
       desc = 'Chỉ bật bơm cấp (IN)';
     } else if (action === 'out_on') {
-      await safeAPI.control('pump_out', 'ON');
-      await safeAPI.control('pump_in', 'OFF');
+      showControlWarning(await safeAPI.control('pump_out', 'ON'));
+      showControlWarning(await safeAPI.control('pump_in', 'OFF'));
       desc = 'Chỉ bật bơm thoát (OUT)';
     }
 
@@ -836,13 +1299,10 @@ async function loadAlerts(page = alertPage) {
            <td><code style="font-size:12px">${a.alert_code}</code></td>
            <td>${a.message}</td>
            <td>${a.value_str || '<span class="text-muted">–</span>'}</td>
-           <td>${a.status === 'PENDING'
+           <td>${a.status === 'UNRESOLVED'
                ? '<span class="badge badge-danger">Chưa xử lý</span>'
                : '<span class="badge badge-success">Đã xử lý</span>'}</td>
            <td>
-             ${a.status === 'PENDING'
-               ? `<button class="btn btn-success btn-sm" onclick="resolveAlert(${a.id})">✓ Xử lý</button>`
-               : ''}
              <button class="btn btn-outline btn-sm" onclick="viewAlert(${a.id},'${escapeHtml(a.message)}')">Xem</button>
            </td>
          </tr>`
@@ -855,14 +1315,6 @@ async function loadAlerts(page = alertPage) {
     renderPagination('alert-pages', alertPage, totalPages, loadAlerts);
 
   } catch(e) { console.error('loadAlerts error:', e); }
-}
-
-async function resolveAlert(id) {
-  try {
-    const r = await safeAPI.resolveAlert(id, 'Đã xử lý qua web dashboard');
-    toast(r.ok ? 'Đã đánh dấu xử lý' : 'Lỗi', r.ok ? 'success' : 'error');
-    loadAlerts(alertPage);
-  } catch { toast('Lỗi kết nối', 'error'); }
 }
 
 function viewAlert(id, msg) {
@@ -1070,7 +1522,7 @@ function escapeHtml(s) {
 function startAutoRefresh() {
   autoRefreshTimer = setInterval(() => {
     if (currentPage === 'tong-quan') loadOverview();
-    if (currentPage === 'bieu-do')   loadChart('hour');
+    if (currentPage === 'bieu-do')   loadChart(currentChartPeriod);
     if (currentPage === 'dieu-khien')loadControlPage();
     if (currentPage === 'he-thong')  loadSystemInfo();
   }, 5000);

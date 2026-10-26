@@ -226,7 +226,7 @@
 
   <!-- ══════════════ PAGE 2: BIỂU ĐỒ ══════════════ -->
   <div class="page" id="page-bieu-do">
-    <!-- Top Filter Bar -->
+    <!-- Time period tabs -->
     <div class="chart-top-filter mb-16">
       <div class="period-pills" id="chart-period-tabs">
         <button class="period-pill active" onclick="changeChartPeriod('30m', this)">30 phút</button>
@@ -235,12 +235,9 @@
         <button class="period-pill" onclick="changeChartPeriod('7d', this)">7 ngày</button>
         <button class="period-pill" onclick="changeChartPeriod('30d', this)">30 ngày</button>
       </div>
-      <div class="date-filter-inline">
-        <span class="filter-lbl">Từ ngày</span>
-        <input type="date" class="filter-date-input" id="chart-date-from">
-        <span class="filter-lbl">Đến ngày</span>
-        <input type="date" class="filter-date-input" id="chart-date-to">
-        <button class="btn btn-primary btn-sm" onclick="filterChartByDate()">🔍 Lọc</button>
+      <div class="chart-period-info" id="chart-period-info">
+        <span class="chart-period-info-icon">◷</span>
+        <span>Đang xem: <strong>30 phút gần nhất</strong> · Mỗi nút tròn trên biểu đồ là giá trị trung bình trong 5 phút.</span>
       </div>
     </div>
 
@@ -758,7 +755,7 @@
           </select>
           <select class="filter-select" id="alert-filter-status" onchange="loadAlerts()">
             <option value="">Tất cả trạng thái</option>
-            <option value="PENDING">Chưa xử lý</option>
+            <option value="UNRESOLVED">Chưa xử lý</option>
             <option value="RESOLVED">Đã xử lý</option>
           </select>
           <div class="filter-group">
@@ -777,7 +774,7 @@
           <thead>
             <tr>
               <th>Thời gian</th><th>Mức độ</th><th>Mã cảnh báo</th>
-              <th>Nội dung</th><th>Giá trị</th><th>Trạng thái</th><th>Thao tác</th>
+              <th>Nội dung</th><th>Giá trị</th><th>Trạng thái</th><th>Xem chi tiết</th>
             </tr>
           </thead>
           <tbody id="alert-tbody"><tr><td colspan="7" style="text-align:center;padding:20px" class="text-muted">Đang tải...</td></tr></tbody>

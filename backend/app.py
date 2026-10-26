@@ -91,11 +91,16 @@ def api_sensor():
             (f"{date_from} 00:00:00", f"{date_to} 23:59:59"), fetch="one"
         )
     else:
-        since = datetime.now() - timedelta(minutes=minutes)
-        sql   = """SELECT * FROM sensor_data
-                   WHERE recorded_at >= %s
-                   ORDER BY recorded_at ASC LIMIT %s"""
-        rows  = db.execute(sql, (since, limit), fetch="all")
+        now = datetime.now()
+        since = now - timedelta(minutes=minutes)
+        latest = request.args.get("latest", "0") == "1"
+        order = "DESC" if latest else "ASC"
+        sql   = f"""SELECT * FROM sensor_data
+                   WHERE recorded_at >= %s AND recorded_at <= %s
+                   ORDER BY recorded_at {order} LIMIT %s"""
+        rows  = db.execute(sql, (since, now, limit), fetch="all")
+        if latest and rows:
+            rows.reverse()
         cnt   = {"c": len(rows) if rows else 0}
 
     return jsonify({
@@ -120,7 +125,9 @@ def api_alerts():
     page      = max(int(request.args.get("page", 1)), 1)
     offset    = (page - 1) * limit
 
-    where, params = [], []
+    # Danh sách và các thẻ thống kê phải dùng cùng một cửa sổ 24 giờ.
+    stats_since = datetime.now() - timedelta(hours=24)
+    where, params = ["created_at >= %s"], [stats_since]
     if severity:
         where.append("severity = %s"); params.append(severity)
     if status:
@@ -139,11 +146,12 @@ def api_alerts():
         f"SELECT COUNT(*) AS c FROM alerts {where_sql}", params, fetch="one"
     )
 
-    # Đếm theo mức độ (24 giờ qua)
+    # Dùng cùng mốc giờ local của backend để không phụ thuộc timezone của MySQL.
     stats = db.execute(
         """SELECT severity, COUNT(*) AS cnt FROM alerts
-           WHERE created_at >= NOW() - INTERVAL 24 HOUR
+           WHERE created_at >= %s
            GROUP BY severity""",
+        (stats_since,),
         fetch="all"
     )
 
@@ -162,14 +170,10 @@ def api_alerts():
 # ============================================================================
 @app.route("/api/alerts/<int:alert_id>/resolve", methods=["POST"])
 def resolve_alert(alert_id):
-    data = request.get_json(silent=True) or {}
-    note = data.get("note", "")
-    db.execute(
-        """UPDATE alerts SET status='RESOLVED', resolved_at=NOW(3),
-           resolved_by='web', note=%s WHERE id=%s""",
-        (note, alert_id),
-    )
-    return jsonify({"ok": True, "id": alert_id})
+    return jsonify({
+        "ok": False,
+        "error": "Cảnh báo được hệ thống tự động xử lý khi điều kiện khôi phục được xác nhận",
+    }), 405
 
 
 # ============================================================================
@@ -189,8 +193,46 @@ def api_control():
     if not payload:
         return jsonify({"ok": False, "error": "Thiếu payload"}), 400
 
+    alert_code = None
+    if command in {"pump_in", "pump_out"}:
+        pump_name = "bơm cấp (IN)" if command == "pump_in" else "bơm thoát (OUT)"
+        suffix = "ON" if payload.upper() in {"ON", "1", "BẬT"} else "OFF"
+        alert_code = f"{command.upper()}_{suffix}"
+        if command == "pump_in" and suffix == "ON":
+            alert_code = "PUMP_IN"
+        if command == "pump_out" and suffix == "ON":
+            alert_code = "PUMP_OUT"
+
     log_id = mqtt_client.publish_command(command, payload, client_ip)
-    return jsonify({"ok": True, "command": command, "payload": payload, "log_id": log_id})
+    active_alert = None
+    if alert_code:
+        active_alert = db.execute(
+            """SELECT id, alert_code, created_at, message
+               FROM alerts
+               WHERE alert_code=%s AND status='UNRESOLVED'
+               ORDER BY created_at DESC LIMIT 1""",
+            (alert_code,),
+            fetch="one",
+        )
+
+    response = {
+        "ok": True,
+        "command": command,
+        "payload": payload,
+        "log_id": log_id,
+    }
+    if active_alert:
+        response["active_alert"] = {
+            "id": active_alert["id"],
+            "code": active_alert["alert_code"],
+            "created_at": _serialize(active_alert)["created_at"],
+            "message": active_alert["message"],
+        }
+        response["warning"] = (
+            f"Lệnh đã gửi tới {pump_name}, nhưng cảnh báo {alert_code} "
+            "cùng loại vẫn đang được hệ thống xử lý nên chưa tạo cảnh báo mới."
+        )
+    return jsonify(response)
 
 
 # ============================================================================

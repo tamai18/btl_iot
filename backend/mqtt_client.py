@@ -2,7 +2,7 @@
 #  mqtt_client.py – Kết nối MQTT, nhận dữ liệu từ ESP32, lưu vào MySQL
 # ============================================================================
 import json, os, logging, threading
-from datetime import datetime
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
 # Tải cấu hình từ .env
@@ -21,6 +21,7 @@ P = os.getenv("MQTT_TOPIC_PREFIX", "iot-ao-demo-123")
 _latest: dict = {}
 _lock = threading.Lock()
 _client: mqtt_lib.Client | None = None
+_recovery_since: dict[str, datetime] = {}
 
 
 def get_latest() -> dict:
@@ -45,6 +46,67 @@ def _map_severity(code: str, msg: str) -> str:
     if any(k in code_upper for k in ("SENSOR", "HIGH_TREND", "TREND", "PUMP")):
         return "WARNING"
     return "INFO"
+
+
+def _active_alert_exists(code: str) -> bool:
+    row = db.execute(
+        "SELECT id FROM alerts WHERE alert_code=%s AND status='UNRESOLVED' "
+        "ORDER BY created_at DESC LIMIT 1",
+        (code,),
+        fetch="one",
+    )
+    return bool(row)
+
+
+def _resolve_alerts_from_sensor(data: dict) -> None:
+    """Tự đóng cảnh báo sau khi điều kiện khôi phục ổn định đủ lâu."""
+    now = datetime.now()
+    try:
+        level = float(data.get("level"))
+        sensor_valid = not bool(data.get("err", 0))
+        fault = str(data.get("fault", "none")).lower()
+    except (TypeError, ValueError):
+        return
+
+    checks = [
+        ("HIGH_LEVEL", level < 88, timedelta(minutes=2)),
+        ("LOW_LEVEL", level > 32, timedelta(minutes=2)),
+        ("SENSOR", sensor_valid, timedelta(minutes=1)),
+        ("PUMP_IN_OFF", sensor_valid and "pump_in" not in fault, timedelta(minutes=1)),
+        ("PUMP_OUT_OFF", sensor_valid and "pump_out" not in fault, timedelta(minutes=1)),
+        ("HIGH_TREND", sensor_valid, timedelta(minutes=3)),
+        ("MODE", sensor_valid, timedelta(0)),
+    ]
+    for code, recovered, stable_for in checks:
+        if not recovered:
+            _recovery_since.pop(code, None)
+            continue
+        if code not in _recovery_since:
+            _recovery_since[code] = now
+        if now - _recovery_since[code] < stable_for:
+            continue
+        result = db.execute(
+            """UPDATE alerts
+               SET status='RESOLVED', resolved_at=%s, resolved_by='SYSTEM',
+                   note=%s, updated_at=%s
+               WHERE alert_code=%s AND status='UNRESOLVED'""",
+            (
+                now,
+                "Hệ thống tự động xác nhận điều kiện cảnh báo đã kết thúc",
+                now,
+                code,
+            ),
+        )
+        if result:
+            db.execute(
+                "INSERT INTO system_logs "
+                "(log_level,component,event_type,message) VALUES (%s,%s,%s,%s)",
+                (
+                    "INFO", "alerts", "auto_resolved",
+                    f"Tự động xử lý cảnh báo {code} sau khi điều kiện ổn định",
+                ),
+            )
+        _recovery_since.pop(code, None)
 
 
 # ── Callbacks ────────────────────────────────────────────────────────────────
@@ -126,6 +188,8 @@ def _on_message(client, userdata, msg):
         except Exception as e:
             logger.error(f"[DB] sensor_data insert error: {e}")
 
+        _resolve_alerts_from_sensor(d)
+
         # Ghi system_log nhẹ
         try:
             db.execute(
@@ -144,12 +208,15 @@ def _on_message(client, userdata, msg):
             msg_txt = str(d.get("msg", ""))
             sev = _map_severity(code, msg_txt)
             latest = get_latest()
-            db.execute(
-                """INSERT INTO alerts (alert_code, message, severity, water_level, status)
-                   VALUES (%s,%s,%s,%s,'PENDING')""",
-                (code, msg_txt, sev, latest.get("level", None)),
-            )
-            logger.info(f"[ALERT] {sev} {code}: {msg_txt}")
+            if not _active_alert_exists(code):
+                db.execute(
+                    """INSERT INTO alerts (alert_code, message, severity, water_level, status)
+                       VALUES (%s,%s,%s,%s,'UNRESOLVED')""",
+                    (code, msg_txt, sev, latest.get("level", None)),
+                )
+                logger.info(f"[ALERT] {sev} {code}: {msg_txt}")
+            else:
+                logger.info(f"[ALERT] Bỏ qua cảnh báo lặp {code} trong cùng đợt sự cố")
         except Exception as e:
             logger.error(f"[DB] alert insert error: {e}")
 

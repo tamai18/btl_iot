@@ -37,6 +37,7 @@ def init_db():
             test_conn = _pool.get_connection()
             test_conn.close()
             _db_type = "mysql"
+            _migrate_alert_status()
             logger.info(">>> [DB] Kết nối thành công MySQL 8.x database: %s", os.getenv("DB_NAME", "iot_ao_nuoi"))
             return
         except Exception as e:
@@ -45,7 +46,39 @@ def init_db():
     # Chuyển sang SQLite fallback
     _db_type = "sqlite"
     _setup_sqlite_schema()
+    _migrate_alert_status()
     logger.info(">>> [DB] Đang hoạt động ở chế độ SQLite @ (%s)", _sqlite_path)
+
+def _migrate_alert_status():
+    """Chuẩn hóa trạng thái cảnh báo và hỗ trợ dữ liệu cũ dùng PENDING."""
+    if _db_type == "mysql":
+        conn = _pool.get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "ALTER TABLE alerts MODIFY status "
+                "ENUM('PENDING','UNRESOLVED','RESOLVED') NOT NULL DEFAULT 'UNRESOLVED'"
+            )
+            conn.commit()
+        except Exception as e:
+            logger.warning("[DB] Không thể cập nhật ENUM alerts.status: %s", e)
+        finally:
+            conn.close()
+        execute("UPDATE alerts SET status='UNRESOLVED' WHERE status='PENDING'")
+        conn = _pool.get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "ALTER TABLE alerts MODIFY status "
+                "ENUM('UNRESOLVED','RESOLVED') NOT NULL DEFAULT 'UNRESOLVED'"
+            )
+            conn.commit()
+        except Exception as e:
+            logger.warning("[DB] Không thể loại bỏ trạng thái PENDING: %s", e)
+        finally:
+            conn.close()
+    else:
+        execute("UPDATE alerts SET status='UNRESOLVED' WHERE status='PENDING'")
 
 def get_db_info():
     if _db_type is None:
@@ -83,7 +116,7 @@ def _setup_sqlite_schema():
         severity TEXT DEFAULT 'INFO',
         water_level REAL,
         value_str TEXT,
-        status TEXT DEFAULT 'PENDING',
+        status TEXT DEFAULT 'UNRESOLVED',
         resolved_at TIMESTAMP,
         resolved_by TEXT,
         note TEXT,
@@ -175,7 +208,7 @@ def _setup_sqlite_schema():
             INSERT INTO alerts (alert_code, message, severity, water_level, value_str, status)
             VALUES (?, ?, ?, ?, ?, ?)
         """, [
-            ('HIGH_LEVEL', 'Mực nước đạt 92% (nguy cơ tràn ao)', 'DANGER', 92.0, '92 %', 'PENDING'),
+            ('HIGH_LEVEL', 'Mực nước đạt 92% (nguy cơ tràn ao)', 'DANGER', 92.0, '92 %', 'UNRESOLVED'),
             ('PUMP_IN_OFF', 'Máy bơm cấp đã tắt', 'WARNING', 50.5, None, 'RESOLVED'),
             ('MODE', 'Chế độ MANUAL được kích hoạt', 'INFO', 43.2, None, 'RESOLVED'),
             ('HIGH_TREND', 'Mực nước tăng nhanh', 'WARNING', 65.0, '+5.2 %/h', 'RESOLVED'),
