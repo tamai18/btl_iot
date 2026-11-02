@@ -29,9 +29,6 @@
     <a class="nav-item active" id="nav-tong-quan" onclick="navigate('tong-quan')">
       <span class="nav-icon">🏠</span> Tổng quan
     </a>
-    <a class="nav-item" id="nav-bieu-do" onclick="navigate('bieu-do')">
-      <span class="nav-icon">📈</span> Biểu đồ
-    </a>
     <a class="nav-item" id="nav-dieu-khien" onclick="navigate('dieu-khien')">
       <span class="nav-icon">🎛️</span> Điều khiển
     </a>
@@ -44,9 +41,6 @@
     </a>
     <a class="nav-item" id="nav-lich-su" onclick="navigate('lich-su')">
       <span class="nav-icon">📋</span> Lịch sử dữ liệu
-    </a>
-    <a class="nav-item" id="nav-he-thong" onclick="navigate('he-thong')">
-      <span class="nav-icon">ℹ️</span> Thông tin hệ thống
     </a>
   </nav>
 </aside>
@@ -74,275 +68,65 @@
 
   <!-- ══════════════ PAGE 1: TỔNG QUAN ══════════════ -->
   <div class="page active" id="page-tong-quan">
-    <!-- Stat cards row -->
-    <div class="stat-grid" style="margin-top:4px;">
-      <div class="stat-card">
-        <div class="stat-icon blue">🌊</div>
-        <div>
-          <div class="stat-label">Mực nước hiện tại</div>
-          <div class="stat-value" id="ov-level">--</div>
-          <div class="stat-unit" id="ov-dist">Khoảng cách: -- cm</div>
-        </div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-icon green" id="ov-esp32-icon">📡</div>
-        <div>
-          <div class="stat-label">Trạng thái ESP32</div>
-          <div class="stat-value text-success" id="ov-esp32-status" style="font-size:18px">Online</div>
-          <div class="stat-unit" id="ov-rssi">RSSI: -- dBm</div>
-        </div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-icon yellow">⚙️</div>
-        <div>
-          <div class="stat-label">Chế độ hoạt động</div>
-          <div class="stat-value text-warning" id="ov-mode" style="font-size:18px">AUTO</div>
-          <div class="stat-unit" id="ov-fault">Fault: none</div>
-        </div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-icon blue">📡</div>
-        <div>
-          <div class="stat-label">Kết nối MQTT</div>
-          <div class="stat-value text-info" id="ov-mqtt" style="font-size:16px">Đã kết nối</div>
-          <div class="stat-unit" id="ov-broker">Broker: --</div>
-        </div>
-      </div>
-    </div>
-
-    <div class="grid-7-3" style="gap:16px;">
-      <!-- Chart -->
-      <div class="card">
-        <div class="card-header">
-          <span class="card-title">📊 Biểu đồ mực nước (30 phút qua)</span>
-          <span style="font-size:12px;color:var(--text-secondary)" id="ov-chart-time"></span>
-        </div>
-        <div class="card-body">
-          <div class="chart-container" style="height:260px;">
-            <canvas id="chart-overview"></canvas>
-          </div>
-        </div>
-      </div>
-
-      <!-- Right column -->
-      <div style="display:flex;flex-direction:column;gap:14px;">
-        <!-- Pump status -->
-        <div class="card">
-          <div class="card-header">
-            <span class="card-title">⚙️ Trạng thái máy bơm</span>
-          </div>
-          <div class="card-body">
-            <div class="pump-status-box">
-              <div class="pump-row">
-                <div class="pump-info">
-                  <span class="pump-emoji">💧</span>
-                  <div>
-                    <div class="pump-name">Bơm cấp nước (IN)</div>
-                    <div class="pump-sub">Relay 1 – GPIO 32</div>
-                  </div>
-                </div>
-                <div class="pump-badge" id="pump-in-badge">
-                  <div class="pump-dot off" id="pump-in-dot"></div>
-                  <span id="pump-in-text">Tắt</span>
-                </div>
-              </div>
-              <div class="pump-row">
-                <div class="pump-info">
-                  <span class="pump-emoji">🟢</span>
-                  <div>
-                    <div class="pump-name">Bơm thoát nước (OUT)</div>
-                    <div class="pump-sub">Relay 2 – GPIO 33</div>
-                  </div>
-                </div>
-                <div class="pump-badge" id="pump-out-badge">
-                  <div class="pump-dot off" id="pump-out-dot"></div>
-                  <span id="pump-out-text">Tắt</span>
-                </div>
-              </div>
-              <!-- Pond diagram -->
-              <div class="pond-diagram">
-                <span class="sensor-icon">📡</span>
-                <div class="dist-line" id="ov-dist-line">↕ -- cm</div>
-                <div class="pond-body">
-                  <div class="pond-water" id="pond-water" style="height:45%"></div>
-                </div>
-                <div class="pond-label" id="pond-pct">Mực nước: --%</div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Latest alerts -->
-        <div class="card">
-          <div class="card-header">
-            <span class="card-title">🔔 Cảnh báo mới nhất</span>
-            <a href="#" onclick="navigate('canh-bao')" style="font-size:12px;color:var(--accent)">Xem tất cả →</a>
-          </div>
-          <div class="alert-list" id="ov-alerts"></div>
-        </div>
-      </div>
-    </div>
-
-    <!-- System model -->
-    <div class="card" style="margin-top:16px;">
-      <div class="card-header">
-        <span class="card-title">🔧 Mô hình hệ thống</span>
-      </div>
-      <div class="card-body">
-        <div class="system-model">
-          <div class="model-node">
-            <div class="model-icon-box">📡</div>
-            <div class="model-label">Cảm biến siêu âm</div>
-            <div class="model-sub">HC-SR04</div>
-          </div>
-          <div class="model-arrow">→</div>
-          <div class="model-node">
-            <div class="model-icon-box">🔧</div>
-            <div class="model-label">ESP32</div>
-            <div class="model-sub">WiFi + MQTT</div>
-          </div>
-          <div class="model-arrow">→</div>
-          <div class="model-node">
-            <div class="model-icon-box">☁️</div>
-            <div class="model-label">MQTT Broker</div>
-            <div class="model-sub">Mosquitto</div>
-          </div>
-          <div class="model-arrow">→</div>
-          <div class="model-node">
-            <div class="model-icon-box">🐍</div>
-            <div class="model-label">Flask Backend</div>
-            <div class="model-sub">Python + MySQL</div>
-          </div>
-          <div class="model-arrow">→</div>
-          <div class="model-node">
-            <div class="model-icon-box">🖥️</div>
-            <div class="model-label">Web Dashboard</div>
-            <div class="model-sub">Trình duyệt</div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- ══════════════ PAGE 2: BIỂU ĐỒ ══════════════ -->
-  <div class="page" id="page-bieu-do">
-    <!-- Time period tabs -->
-    <div class="chart-top-filter mb-16">
-      <div class="period-pills" id="chart-period-tabs">
-        <button class="period-pill active" onclick="changeChartPeriod('30m', this)">30 phút</button>
-        <button class="period-pill" onclick="changeChartPeriod('1h', this)">1 giờ</button>
-        <button class="period-pill" onclick="changeChartPeriod('6h', this)">6 giờ</button>
-        <button class="period-pill" onclick="changeChartPeriod('7d', this)">7 ngày</button>
-        <button class="period-pill" onclick="changeChartPeriod('30d', this)">30 ngày</button>
-      </div>
-      <div class="chart-period-info" id="chart-period-info">
-        <span class="chart-period-info-icon">◷</span>
-        <span>Đang xem: <strong>30 phút gần nhất</strong> · Mỗi nút tròn trên biểu đồ là giá trị trung bình trong 5 phút.</span>
-      </div>
-    </div>
-
-    <!-- 1. Biểu đồ mực nước theo thời gian -->
-    <div class="card mb-16">
-      <div class="card-header chart-custom-header">
-        <span class="card-title">📊 Biểu đồ mực nước theo thời gian</span>
-        <div class="chart-legend-top">
-          <span class="leg-item"><span class="leg-line-dot blue"></span> Mực nước hiện tại</span>
-          <span class="leg-item"><span class="leg-dash red"></span> Ngưỡng nguy hiểm (≥ 90%)</span>
-          <span class="leg-item"><span class="leg-dash yellow"></span> Ngưỡng cảnh báo (≥ 80%)</span>
-        </div>
-      </div>
-      <div class="card-body">
-        <div class="chart-container" style="height:230px;">
-          <canvas id="chart-water-level"></canvas>
-        </div>
-      </div>
-    </div>
-
-    <!-- 2. Biểu đồ khoảng cách cảm biến -->
-    <div class="card mb-16">
-      <div class="card-header chart-custom-header">
-        <span class="card-title">📊 Biểu đồ khoảng cách cảm biến</span>
-        <div class="chart-legend-top">
-          <span class="leg-item"><span class="leg-line-dot green"></span> Khoảng cách hiện tại</span>
-          <span class="leg-item"><span class="leg-dash red"></span> Ngưỡng cảnh báo thấp</span>
-          <span class="leg-item"><span class="leg-dash yellow"></span> Ngưỡng cảnh báo cao</span>
-        </div>
-      </div>
-      <div class="card-body">
-        <div class="chart-container" style="height:210px;">
-          <canvas id="chart-distance"></canvas>
-        </div>
-      </div>
-    </div>
-
-    <!-- 3. Trạng thái máy bơm theo thời gian -->
-    <div class="card mb-16">
-      <div class="card-header chart-custom-header">
-        <span class="card-title">⚙️ Trạng thái máy bơm theo thời gian</span>
-        <div class="chart-legend-top">
-          <span class="leg-item"><span class="leg-square blue"></span> Bơm đang bật</span>
-          <span class="leg-item"><span class="leg-square light-blue"></span> Bơm đang tắt</span>
-        </div>
-      </div>
-      <div class="card-body">
-        <div class="pump-timeline-wrap">
-          <div class="pump-timeline-row">
-            <div class="pump-timeline-label">Bơm cấp (IN)</div>
-            <div class="pump-timeline-track" id="track-pump-in"></div>
-          </div>
-          <div class="pump-timeline-row">
-            <div class="pump-timeline-label">Bơm thoát (OUT)</div>
-            <div class="pump-timeline-track" id="track-pump-out"></div>
-          </div>
-          <div class="pump-timeline-axis" id="track-axis">
-            <span>21:15</span><span>21:20</span><span>21:25</span><span>21:30</span><span>21:35</span><span>21:40</span><span>21:45</span>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- 4. Thống kê trong khoảng thời gian -->
-    <div class="card">
-      <div class="card-header">
-        <span class="card-title">📅 Thống kê trong khoảng thời gian</span>
-      </div>
+    <div class="card overview-stats-card">
+      <div class="card-header"><span class="card-title">📅 Thống kê trong khoảng thời gian</span></div>
       <div class="card-body">
         <div class="stat-summary-grid">
-          <div class="stat-box-card">
-            <div class="stat-box-icon text-danger" style="font-size:28px;">↑</div>
-            <div>
-              <div class="stat-box-lbl">Mực nước cao nhất</div>
-              <div class="stat-box-val text-danger" id="chart-stat-max">82.3 %</div>
-              <div class="stat-box-sub" id="chart-stat-max-time">(21:42:15)</div>
-            </div>
-          </div>
-          <div class="stat-box-card">
-            <div class="stat-box-icon text-info" style="font-size:28px;">↓</div>
-            <div>
-              <div class="stat-box-lbl">Mực nước thấp nhất</div>
-              <div class="stat-box-val text-info" id="chart-stat-min">28.1 %</div>
-              <div class="stat-box-sub" id="chart-stat-min-time">(21:17:08)</div>
-            </div>
-          </div>
-          <div class="stat-box-card">
-            <div class="stat-box-icon text-warning" style="font-size:28px;">∑</div>
-            <div>
-              <div class="stat-box-lbl">Mực nước trung bình</div>
-              <div class="stat-box-val" id="chart-stat-avg" style="color:#0f3b73;">52.6 %</div>
-              <div class="stat-box-sub">Trung bình cộng</div>
-            </div>
-          </div>
-          <div class="stat-box-card">
-            <div class="stat-box-icon" style="color:#8b5cf6;font-size:26px;">📏</div>
-            <div>
-              <div class="stat-box-lbl">Khoảng cách TB</div>
-              <div class="stat-box-val" id="chart-stat-dist" style="color:#8b5cf6;">56.7 cm</div>
-              <div class="stat-box-sub">Cảm biến HC-SR04</div>
-            </div>
-          </div>
+          <div class="stat-box-card"><div class="stat-box-icon text-danger">↑</div><div><div class="stat-box-lbl">Mực nước cao nhất</div><div class="stat-box-val text-danger" id="chart-stat-max">--</div><div class="stat-box-sub" id="chart-stat-max-time">--</div></div></div>
+          <div class="stat-box-card"><div class="stat-box-icon text-info">↓</div><div><div class="stat-box-lbl">Mực nước thấp nhất</div><div class="stat-box-val text-info" id="chart-stat-min">--</div><div class="stat-box-sub" id="chart-stat-min-time">--</div></div></div>
+          <div class="stat-box-card"><div class="stat-box-icon text-warning">∑</div><div><div class="stat-box-lbl">Mực nước trung bình</div><div class="stat-box-val" id="chart-stat-avg">--</div><div class="stat-box-sub">Trung bình cộng</div></div></div>
+          <div class="stat-box-card"><div class="stat-box-icon distance-icon">📏</div><div><div class="stat-box-lbl">Khoảng cách TB</div><div class="stat-box-val distance-value" id="chart-stat-dist">--</div><div class="stat-box-sub">Cảm biến HC-SR04</div></div></div>
         </div>
       </div>
     </div>
+
+    <div class="dashboard-overview-grid">
+      <main>
+        <div class="chart-top-filter mb-16">
+          <div class="period-pills" id="chart-period-tabs">
+            <button class="period-pill active" onclick="changeChartPeriod('30m', this)">30 phút</button>
+            <button class="period-pill" onclick="changeChartPeriod('1h', this)">1 giờ</button>
+            <button class="period-pill" onclick="changeChartPeriod('6h', this)">6 giờ</button>
+            <button class="period-pill" onclick="changeChartPeriod('7d', this)">7 ngày</button>
+            <button class="period-pill" onclick="changeChartPeriod('30d', this)">30 ngày</button>
+          </div>
+          <div class="chart-period-info" id="chart-period-info"><span class="chart-period-info-icon">◷</span><span>Đang xem: <strong>30 phút gần nhất</strong></span></div>
+        </div>
+        <div class="card mb-16">
+          <div class="card-header chart-custom-header">
+            <span class="card-title">📊 Biểu đồ mực nước theo thời gian</span>
+            <div class="chart-legend-top"><span class="leg-item"><span class="leg-line-dot blue"></span> Mực nước hiện tại</span><span class="leg-item"><span class="leg-dash red"></span> Ngưỡng nguy hiểm (≥ 90%)</span><span class="leg-item"><span class="leg-dash yellow"></span> Ngưỡng cảnh báo (≥ 80%)</span></div>
+          </div>
+          <div class="card-body"><div class="chart-container" style="height:230px;"><canvas id="chart-water-level"></canvas></div></div>
+        </div>
+        <div class="card mb-16">
+          <div class="card-header chart-custom-header">
+            <span class="card-title">⚙️ Trạng thái máy bơm theo thời gian</span>
+            <div class="chart-legend-top"><span class="leg-item"><span class="leg-square blue"></span> Bơm đang bật</span><span class="leg-item"><span class="leg-square light-blue"></span> Bơm đang tắt</span></div>
+          </div>
+          <div class="card-body"><div class="pump-timeline-wrap">
+            <div class="pump-timeline-row"><div class="pump-timeline-label">Bơm cấp (IN)</div><div class="pump-timeline-track" id="track-pump-in"></div></div>
+            <div class="pump-timeline-row"><div class="pump-timeline-label">Bơm thoát (OUT)</div><div class="pump-timeline-track" id="track-pump-out"></div></div>
+            <div class="pump-timeline-axis" id="track-axis"></div>
+          </div></div>
+        </div>
+      </main>
+      <aside class="overview-side">
+        <div class="card mb-16">
+          <div class="card-header"><span class="card-title">🔔 Cảnh báo mới nhất</span><a href="#" onclick="navigate('canh-bao')" style="font-size:12px;color:var(--accent)">Xem tất cả →</a></div>
+          <div class="alert-list" id="ov-alerts"></div>
+        </div>
+        <div class="card">
+          <div class="card-header"><span class="card-title">⚙️ Trạng thái máy bơm</span></div>
+          <div class="card-body"><div class="pump-status-box">
+            <div class="pump-row"><div class="pump-info"><span class="pump-emoji">💧</span><div><div class="pump-name">Bơm cấp nước (IN)</div><div class="pump-sub">Relay 1 – GPIO 32</div></div></div><div class="pump-badge" id="pump-in-badge"><div class="pump-dot off" id="pump-in-dot"></div><span id="pump-in-text">Tắt</span></div></div>
+            <div class="pump-row"><div class="pump-info"><span class="pump-emoji">🟢</span><div><div class="pump-name">Bơm thoát nước (OUT)</div><div class="pump-sub">Relay 2 – GPIO 33</div></div></div><div class="pump-badge" id="pump-out-badge"><div class="pump-dot off" id="pump-out-dot"></div><span id="pump-out-text">Tắt</span></div></div>
+            <div class="pond-diagram"><span class="sensor-icon">📡</span><div class="dist-line" id="ov-dist-line">↕ -- cm</div><div class="pond-body"><div class="pond-water" id="pond-water" style="height:45%"></div></div><div class="pond-label" id="pond-pct">Mực nước: --%</div></div>
+          </div></div>
+        </div>
+      </aside>
+    </div>
+
   </div>
 
   <!-- ══════════════ PAGE 3: ĐIỀU KHIỂN ══════════════ -->
@@ -466,44 +250,18 @@
       </div>
     </div>
 
-    <!-- 3. Grid: Điều khiển nhanh & Phản hồi lệnh gần nhất -->
-    <div class="grid-2 mb-16">
-      <!-- Cột trái: Điều khiển nhanh -->
-      <div class="card">
-        <div class="card-header">
-          <span class="card-title">🕹️ Điều khiển nhanh</span>
-        </div>
-        <div class="card-body">
-          <div class="quick-action-grid">
-            <button class="btn-quick blue" onclick="quickAction('both_on')">
-              <span>💧</span> Bật cả hai bơm
-            </button>
-            <button class="btn-quick amber" onclick="quickAction('both_off')">
-              <span>⏹</span> Tắt cả hai bơm
-            </button>
-            <button class="btn-quick green" onclick="quickAction('in_on')">
-              <span>💧</span> Chỉ bật bơm cấp (IN)
-            </button>
-            <button class="btn-quick purple" onclick="quickAction('out_on')">
-              <span>💧</span> Chỉ bật bơm thoát (OUT)
-            </button>
-          </div>
-        </div>
+    <!-- 3. Phản hồi lệnh gần nhất -->
+    <div class="card mb-16">
+      <div class="card-header">
+        <span class="card-title">🛡️ Phản hồi lệnh gần nhất</span>
       </div>
-
-      <!-- Cột phải: Phản hồi lệnh gần nhất -->
-      <div class="card">
-        <div class="card-header">
-          <span class="card-title">🛡️ Phản hồi lệnh gần nhất</span>
-        </div>
-        <div class="card-body">
-          <div class="feedback-box">
-            <div class="feedback-check-circle">✓</div>
-            <div class="feedback-info">
-              <div class="feedback-time" id="feedback-time">21:45:30</div>
-              <div class="feedback-cmd" id="feedback-cmd">Nhận lệnh: Bật bơm cấp (IN)</div>
-              <div class="feedback-result text-success" id="feedback-result">Kết quả: Thành công</div>
-            </div>
+      <div class="card-body">
+        <div class="feedback-box">
+          <div class="feedback-check-circle">✓</div>
+          <div class="feedback-info">
+            <div class="feedback-time" id="feedback-time">21:45:30</div>
+            <div class="feedback-cmd" id="feedback-cmd">Nhận lệnh: Bật bơm cấp (IN)</div>
+            <div class="feedback-result text-success" id="feedback-result">Kết quả: Thành công</div>
           </div>
         </div>
       </div>
@@ -789,10 +547,19 @@
 
   <!-- ══════════════ PAGE 6: LỊCH SỬ DỮ LIỆU ══════════════ -->
   <div class="page" id="page-lich-su">
-    <h1 class="page-title">📋 Lịch sử dữ liệu</h1>
-    <p class="page-sub">Dữ liệu mực nước và trạng thái thiết bị được lưu trữ trong MySQL</p>
+    <h1 class="page-title">🕘 Lịch sử hệ thống</h1>
+    <p class="page-sub">Tra cứu dữ liệu cảm biến và nhật ký hoạt động của hệ thống IoT</p>
 
-    <div class="card">
+    <div class="history-tabs">
+      <button class="history-tab active" id="history-tab-sensor" onclick="switchHistoryTab('sensor', this)">
+        <span>▣</span> Dữ liệu cảm biến
+      </button>
+      <button class="history-tab" id="history-tab-logs" onclick="switchHistoryTab('logs', this)">
+        <span>▤</span> Nhật ký hệ thống
+      </button>
+    </div>
+
+    <div class="card history-panel" id="history-sensor-panel">
       <div class="card-header">
         <span class="card-title">📊 Dữ liệu mực nước và trạng thái thiết bị</span>
         <div style="display:flex;gap:8px;">
@@ -816,7 +583,7 @@
             <span class="filter-label">Đến ngày</span>
             <input type="date" class="filter-input" id="hist-to">
           </div>
-          <button class="btn btn-primary btn-sm" onclick="loadHistory()">🔍 Lọc</button>
+          <button class="btn btn-primary btn-sm" onclick="applyHistoryFilter()">🔍 Lọc</button>
         </div>
       </div>
       <div class="table-wrap">
@@ -824,17 +591,16 @@
           <thead>
             <tr>
               <th>Thời gian</th><th>Mực nước (%)</th><th>Khoảng cách (cm)</th>
-              <th>Bơm cấp (IN)</th><th>Bơm thoát (OUT)</th><th>Chế độ</th>
-              <th>RSSI (dBm)</th><th>Lỗi</th>
+              <th>Bơm cấp (IN)</th><th>Bơm thoát (OUT)</th><th>Chế độ</th><th>Lỗi</th>
             </tr>
           </thead>
-          <tbody id="hist-tbody"><tr><td colspan="8" style="text-align:center;padding:20px" class="text-muted">Đang tải...</td></tr></tbody>
+          <tbody id="hist-tbody"><tr><td colspan="7" style="text-align:center;padding:20px" class="text-muted">Đang tải...</td></tr></tbody>
         </table>
       </div>
       <div class="pagination">
         <div style="display:flex;align-items:center;gap:12px;">
           <span id="hist-info" style="color:var(--text-secondary)">--</span>
-          <select class="filter-select" id="hist-limit" onchange="loadHistory()" style="height:28px;font-size:12px;">
+          <select class="filter-select" id="hist-limit" onchange="changeHistoryLimit()" style="height:28px;font-size:12px;">
             <option value="20">20 dòng/trang</option>
             <option value="50">50 dòng/trang</option>
             <option value="100">100 dòng/trang</option>
@@ -843,79 +609,46 @@
         <div class="page-btns" id="hist-pages"></div>
       </div>
     </div>
-  </div>
 
-  <!-- ══════════════ PAGE 7: THÔNG TIN HỆ THỐNG ══════════════ -->
-  <div class="page" id="page-he-thong">
-    <h1 class="page-title">ℹ️ Thông tin hệ thống</h1>
-    <p class="page-sub">Trạng thái thiết bị, kết nối MQTT, phiên bản phần mềm và nhật ký hệ thống</p>
-
-    <div class="info-grid" style="margin-bottom:16px;">
-      <!-- ESP32 Info -->
-      <div class="info-box">
-        <div class="info-box-title">🔧 Thông tin thiết bị ESP32</div>
-        <div class="info-row"><span class="info-key">Tên thiết bị</span>    <span class="info-val" id="sys-device-name">ESP32-AO-NUOI</span></div>
-        <div class="info-row"><span class="info-key">Thời gian hoạt động</span><span class="info-val" id="sys-uptime">--</span></div>
-        <div class="info-row"><span class="info-key">Cường độ Wi-Fi (RSSI)</span><span class="info-val" id="sys-rssi">--</span></div>
-        <div class="info-row"><span class="info-key">Chế độ hoạt động</span><span class="info-val" id="sys-mode">--</span></div>
-        <div class="info-row"><span class="info-key">Trạng thái</span>       <span class="info-val" id="sys-esp32-status"><span class="badge badge-success">Online</span></span></div>
-        <div class="info-row"><span class="info-key">Lỗi cảm biến</span>    <span class="info-val" id="sys-sensor-err">--</span></div>
-        <div class="info-row"><span class="info-key">Fault code</span>       <span class="info-val" id="sys-fault">none</span></div>
-        <div class="info-row"><span class="info-key">Nhận dữ liệu cuối</span><span class="info-val" id="sys-last-data">--</span></div>
-      </div>
-
-      <!-- MQTT Info -->
-      <div class="info-box">
-        <div class="info-box-title">📡 Thông tin kết nối MQTT</div>
-        <div class="info-row"><span class="info-key">Broker</span>           <span class="info-val" id="sys-mqtt-broker">--</span></div>
-        <div class="info-row"><span class="info-key">Tên người dùng</span>  <span class="info-val">esp32</span></div>
-        <div class="info-row"><span class="info-key">Trạng thái</span>       <span class="info-val" id="sys-mqtt-status"><span class="badge badge-success">Đã kết nối</span></span></div>
-        <div class="info-row"><span class="info-key">Topic prefix</span>     <span class="info-val" id="sys-mqtt-topic">--</span></div>
-        <div class="info-row"><span class="info-key">Topic data</span>       <span class="info-val" id="sys-topic-data">--</span></div>
-        <div class="info-row"><span class="info-key">Topic cmd</span>        <span class="info-val" id="sys-topic-cmd">--</span></div>
-      </div>
-
-      <!-- Web System Info -->
-      <div class="info-box">
-        <div class="info-box-title">🌐 Thông tin hệ thống Web</div>
-        <div class="info-row"><span class="info-key">Phiên bản</span>       <span class="info-val" id="sys-web-version">1.0.0</span></div>
-        <div class="info-row"><span class="info-key">Cơ sở dữ liệu</span>  <span class="info-val">MySQL 8.x (iot_ao_nuoi)</span></div>
-        <div class="info-row"><span class="info-key">Backend</span>         <span class="info-val">Python Flask + Paho MQTT</span></div>
-        <div class="info-row"><span class="info-key">Số bản ghi dữ liệu</span><span class="info-val" id="sys-total-records">--</span></div>
-        <div class="info-row"><span class="info-key">Ngôn ngữ</span>       <span class="info-val">Tiếng Việt</span></div>
-        <div class="info-row"><span class="info-key">Thời gian server</span><span class="info-val" id="sys-server-time">--</span></div>
-      </div>
-
-      <!-- System Logs -->
-      <div class="info-box">
-        <div class="info-box-title" style="justify-content:space-between;">
-          📝 Nhật ký hệ thống (log)
-          <button class="btn btn-outline btn-sm" onclick="loadSysLogs()">🔄</button>
-        </div>
-        <div class="log-list" id="sys-log-list" style="max-height:200px;overflow-y:auto;">
-          <div class="log-row text-muted">Đang tải...</div>
+    <div class="card history-panel" id="history-logs-panel" style="display:none;">
+      <div class="card-header">
+        <span class="card-title">📝 Nhật ký hoạt động của hệ thống</span>
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-success btn-sm" onclick="exportLogsCSV()">📥 Xuất CSV</button>
+          <button class="btn btn-primary btn-sm" onclick="exportLogsExcel()">📥 Xuất Excel</button>
         </div>
       </div>
-    </div>
-
-    <!-- Tech stack table -->
-    <div class="card">
-      <div class="card-header"><span class="card-title">🛠️ Bộ công nghệ sử dụng</span></div>
+      <div class="card-body" style="padding-bottom:0;">
+        <div class="filter-bar">
+          <div class="filter-group"><span class="filter-label">Từ ngày</span><input type="date" class="filter-input" id="log-from"></div>
+          <div class="filter-group"><span class="filter-label">Đến ngày</span><input type="date" class="filter-input" id="log-to"></div>
+          <div class="filter-group"><span class="filter-label">Mức độ</span>
+            <select class="filter-select" id="log-level">
+              <option value="">Tất cả</option><option value="INFO">INFO</option><option value="SUCCESS">SUCCESS</option><option value="WARNING">WARNING</option><option value="ERROR">ERROR</option>
+            </select>
+          </div>
+          <div class="filter-group"><span class="filter-label">Thành phần</span>
+            <select class="filter-select" id="log-component">
+              <option value="">Tất cả</option><option value="esp32">ESP32</option><option value="mqtt">MQTT</option><option value="flask">Hệ thống</option><option value="sensor">Cảm biến</option>
+            </select>
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="applyLogFilter()">🔍 Lọc</button>
+        </div>
+      </div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Thành phần</th><th>Công nghệ</th><th>Mô tả</th></tr></thead>
-          <tbody>
-            <tr><td>Vi điều khiển</td><td><span class="badge badge-blue">ESP32</span></td><td>ESP32 Dev Module, WiFi + BLE</td></tr>
-            <tr><td>Cảm biến</td>     <td><span class="badge badge-blue">HC-SR04</span></td><td>Cảm biến siêu âm đo khoảng cách</td></tr>
-            <tr><td>Điều khiển</td>   <td><span class="badge badge-blue">Relay 2 kênh</span></td><td>Bơm cấp (GPIO 32) + Bơm thoát (GPIO 33)</td></tr>
-            <tr><td>Giao thức</td>    <td><span class="badge badge-blue">MQTT</span></td><td>PubSubClient v2.8, QoS 1</td></tr>
-            <tr><td>MQTT Broker</td>  <td><span class="badge badge-blue">Mosquitto</span></td><td>Eclipse Mosquitto, port 1883</td></tr>
-            <tr><td>Backend</td>      <td><span class="badge badge-blue">Python Flask + Paho MQTT</span></td><td>REST API + MQTT subscriber</td></tr>
-            <tr><td>Cơ sở dữ liệu</span><td><span class="badge badge-blue">MySQL 8.x</span></td><td>Database: iot_ao_nuoi, 5 bảng</td></tr>
-            <tr><td>Frontend</td>     <td><span class="badge badge-blue">HTML + CSS + JavaScript</span></td><td>SPA 7 trang, responsive</td></tr>
-            <tr><td>Biểu đồ</td>      <td><span class="badge badge-blue">Chart.js 4.4</span></td><td>Line chart, Bar chart</td></tr>
-          </tbody>
+          <thead><tr><th>Thời gian</th><th>Mức độ</th><th>Thành phần</th><th>Nội dung</th></tr></thead>
+          <tbody id="log-tbody"><tr><td colspan="4" style="text-align:center;padding:20px" class="text-muted">Đang tải...</td></tr></tbody>
         </table>
+      </div>
+      <div class="pagination">
+        <div style="display:flex;align-items:center;gap:12px;">
+          <span id="log-info" style="color:var(--text-secondary)">--</span>
+          <select class="filter-select" id="log-limit" onchange="changeLogLimit()" style="height:28px;font-size:12px;">
+            <option value="15">15 bản ghi/trang</option><option value="30">30 bản ghi/trang</option><option value="50">50 bản ghi/trang</option>
+          </select>
+        </div>
+        <div class="page-btns" id="log-pages"></div>
       </div>
     </div>
   </div>

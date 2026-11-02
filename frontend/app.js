@@ -5,12 +5,13 @@
 // ── State ────────────────────────────────────────────────────────────────────
 let currentPage = 'tong-quan';
 let chartOverview = null, chartMain = null, chartPump = null;
-let alertPage = 1, histPage = 1;
+let alertPage = 1, histPage = 1, ctrlLogPage = 1;
 let autoRefreshTimer = null;
 let configCache = {};
 
 // ── Navigation ────────────────────────────────────────────────────────────────
 function navigate(page) {
+  hidePumpTimelineTooltip();
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
 
@@ -23,15 +24,21 @@ function navigate(page) {
   onPageLoad(page);
 }
 
+function hidePumpTimelineTooltip() {
+  const tooltip = document.getElementById('pump-timeline-tooltip');
+  if (tooltip) {
+    tooltip.hidden = true;
+    tooltip.style.display = 'none';
+  }
+}
+
 function onPageLoad(page) {
   switch (page) {
     case 'tong-quan':  loadOverview(); break;
-    case 'bieu-do':    loadChart('30m'); break;
     case 'dieu-khien': loadControlPage(); break;
     case 'cau-hinh':   loadConfig(); break;
     case 'canh-bao':   loadAlerts(); break;
     case 'lich-su':    loadHistory(); break;
-    case 'he-thong':   loadSystemInfo(); break;
   }
 }
 
@@ -71,6 +78,28 @@ function sevBadge(s) {
   const map = { DANGER:'danger', WARNING:'warning', INFO:'info' };
   const labels = { DANGER:'Nguy hiểm', WARNING:'Cảnh báo', INFO:'Thông tin' };
   return `<span class="badge badge-${map[s]||'gray'}">${labels[s]||s}</span>`;
+}
+
+function getLatestRecord(status) {
+  const record = { ...(status.last_record || {}) };
+  const latest = status.latest || {};
+  const fields = {
+    level: 'water_level',
+    dist: 'distance_cm',
+    in: 'pump_in',
+    out: 'pump_out',
+    auto: 'auto_mode',
+    err: 'sensor_err',
+    fault: 'fault_code',
+    rssi: 'rssi',
+    up: 'uptime_sec',
+  };
+
+  Object.entries(fields).forEach(([latestKey, recordKey]) => {
+    if (latest[latestKey] != null) record[recordKey] = latest[latestKey];
+  });
+  if (latest.ts) record.recorded_at = latest.ts;
+  return record;
 }
 
 function pumpBadge(v) {
@@ -186,8 +215,9 @@ async function loadOverview() {
       safeAPI.status(),
       safeAPI.sensor({ minutes: 30 }),
     ]);
+    loadChart(currentChartPeriod);
 
-    const rec = status.last_record || {};
+    const rec = getLatestRecord(status);
     const cfg = status.config || {};
     const lvl = rec.water_level ?? 0;
 
@@ -200,15 +230,24 @@ async function loadOverview() {
 
     const isOnline = status.esp32_status === 'online' || (status.last_record && status.last_record.recorded_at);
     setText('ov-esp32-status', isOnline ? 'Online' : 'Offline');
-    document.getElementById('ov-esp32-status').className = 'stat-value ' + (isOnline ? 'text-success' : 'text-danger');
+    const overviewEsp32Status = document.getElementById('ov-esp32-status');
+    if (overviewEsp32Status) {
+      overviewEsp32Status.className = 'stat-value ' + (isOnline ? 'text-success' : 'text-danger');
+    }
 
     const modeAuto = rec.auto_mode;
     setText('ov-mode', modeAuto ? 'AUTO' : 'MANUAL');
-    document.getElementById('ov-mode').className = 'stat-value ' + (modeAuto ? 'text-success' : 'text-warning');
+    const overviewMode = document.getElementById('ov-mode');
+    if (overviewMode) {
+      overviewMode.className = 'stat-value ' + (modeAuto ? 'text-success' : 'text-warning');
+    }
 
     const mqttOk = status.mqtt_connected;
     setText('ov-mqtt', mqttOk ? 'Đã kết nối' : 'Mất kết nối');
-    document.getElementById('ov-mqtt').className = 'stat-value ' + (mqttOk ? 'text-info' : 'text-danger');
+    const overviewMqtt = document.getElementById('ov-mqtt');
+    if (overviewMqtt) {
+      overviewMqtt.className = 'stat-value ' + (mqttOk ? 'text-info' : 'text-danger');
+    }
 
     // ESP32 status dot in topbar
     const dot = document.getElementById('esp32-dot');
@@ -235,6 +274,7 @@ async function loadOverview() {
           recorded_at: rec.recorded_at || new Date().toISOString(),
           water_level: lvl,
         }];
+    updateChartStats(rows);
     const chartRecords = resampleChartRecords(
       overviewRecords,
       { minutes: 30, chartPoints: 30 },
@@ -321,7 +361,7 @@ async function loadOverview() {
 
     // Latest alerts
     const [alertData, unresolvedAlerts] = await Promise.all([
-      safeAPI.alerts({ limit: 3 }),
+      safeAPI.alerts({ limit: 3, recent_hours: 24 }),
       safeAPI.alerts({ status: 'UNRESOLVED', limit: 200 }),
     ]);
     renderOverviewAlerts(alertData.data || []);
@@ -358,7 +398,7 @@ function renderOverviewAlerts(alerts) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-//  PAGE 2: BIỂU ĐỒ (Chart Page)
+//  BIỂU ĐỒ TRÊN TRANG TỔNG QUAN
 // ══════════════════════════════════════════════════════════════════════════════
 let chartWaterLevel = null;
 let chartDistance = null;
@@ -409,25 +449,51 @@ async function loadChart(period = '30m') {
       safeAPI.sensor({ minutes: mins, limit: 2000, latest: 1 }),
       safeAPI.status(),
     ]);
-
-    const records = (sensorData.data && sensorData.data.length > 0)
-      ? sensorData.data
-      : generateMockChartSeries(period);
-    const statsRecords = (statsData.data && statsData.data.length > 0)
+    const records = (statsData.data && statsData.data.length > 0)
       ? statsData.data
-      : records;
+      : (sensorData.data || []);
+    const statsRecords = records;
     const realtimeStatsRecords = filterRecordsToCurrentPeriod(statsRecords, config.minutes);
-    if (requestId !== chartLoadRequest || currentPage !== 'bieu-do') return;
+    if (requestId !== chartLoadRequest || currentPage !== 'tong-quan') return;
 
     // Chuẩn bị dữ liệu hiển thị
     const chartRecords = resampleChartRecords(records, config, period);
     const chartDisplayNow = new Date();
+    const requestedRange = {
+      start: new Date(Date.now() - config.minutes * 60 * 1000).toISOString(),
+      end: chartDisplayNow.toISOString(),
+    };
     updateChartPeriodInfo(period, {
-      start: chartRecords[0]?.recorded_at,
-      end: chartRecords[chartRecords.length - 1]?.recorded_at,
+      start: requestedRange.start,
+      end: requestedRange.end,
     });
+    if (!chartRecords.length) {
+      const info = document.getElementById('chart-period-info');
+      if (info) {
+        info.innerHTML = '<span class="chart-period-info-icon">ℹ</span>'
+          + '<span>Chưa có dữ liệu trong khoảng thời gian này.</span>';
+      }
+    }
     const labels = chartRecords.map(r => formatChartAxisLabel(r.recorded_at, period));
     const markerIndexes = getChartMarkerIndexes(chartRecords, period);
+    if (chartRecords.length && markerIndexes.size) {
+      const lastData = [...chartRecords]
+        .reverse()
+        .find(record => record.water_level != null);
+      const lastDataDate = lastData?.recorded_at?.slice(0, 10);
+      const lastDateMarkers = [...markerIndexes]
+        .filter(index => chartRecords[index]?.recorded_at?.slice(0, 10) === lastDataDate)
+        .sort((a, b) => a - b);
+      const lastDateMarker = lastDateMarkers[lastDateMarkers.length - 1];
+      if (lastDateMarker != null) {
+        chartRecords.slice(lastDateMarker + 1).forEach(record => {
+          record.water_level = null;
+          record.distance_cm = null;
+          record.pump_in = null;
+          record.pump_out = null;
+        });
+      }
+    }
     const showTick = index => markerIndexes.has(index);
     const xTickConfig = {
       autoSkip: false,
@@ -437,8 +503,12 @@ async function loadChart(period = '30m') {
       color: '#64748b',
       callback: (value, index) => showTick(index) ? labels[index] : '',
     };
-    const levels = chartRecords.map(r => +(r.water_level || 0));
-    const dists  = chartRecords.map(r => +(r.distance_cm || 0));
+    const levels = chartRecords.map(r =>
+      r.water_level == null ? null : Number(r.water_level)
+    );
+    const dists  = chartRecords.map(r =>
+      r.distance_cm == null ? null : Number(r.distance_cm)
+    );
 
     // 1. Biểu đồ mực nước theo thời gian
     const ctxLvl = document.getElementById('chart-water-level')?.getContext('2d');
@@ -462,6 +532,7 @@ async function loadChart(period = '30m') {
               pointBackgroundColor: '#1890ff',
               pointBorderColor: '#ffffff',
               pointBorderWidth: 1.5,
+              spanGaps: false,
             },
             {
               label: 'Ngưỡng nguy hiểm (≥ 90%)',
@@ -471,6 +542,7 @@ async function loadChart(period = '30m') {
               borderWidth: 1.5,
               pointRadius: 0,
               fill: false,
+              spanGaps: false,
             },
             {
               label: 'Ngưỡng cảnh báo (≥ 80%)',
@@ -480,12 +552,14 @@ async function loadChart(period = '30m') {
               borderWidth: 1.5,
               pointRadius: 0,
               fill: false,
+              spanGaps: false,
             },
           ],
         },
         options: {
           responsive: true,
           maintainAspectRatio: false,
+          spanGaps: false,
           interaction: { mode: 'nearest', intersect: true },
           plugins: {
             legend: { display: false },
@@ -543,6 +617,7 @@ async function loadChart(period = '30m') {
               pointBackgroundColor: '#10b981',
               pointBorderColor: '#ffffff',
               pointBorderWidth: 1.5,
+              spanGaps: false,
             },
             {
               label: 'Ngưỡng cảnh báo thấp',
@@ -552,6 +627,7 @@ async function loadChart(period = '30m') {
               borderWidth: 1.5,
               pointRadius: 0,
               fill: false,
+              spanGaps: false,
             },
             {
               label: 'Ngưỡng cảnh báo cao',
@@ -561,12 +637,14 @@ async function loadChart(period = '30m') {
               borderWidth: 1.5,
               pointRadius: 0,
               fill: false,
+              spanGaps: false,
             },
           ],
         },
         options: {
           responsive: true,
           maintainAspectRatio: false,
+          spanGaps: false,
           interaction: { mode: 'nearest', intersect: true },
           plugins: {
             legend: { display: false },
@@ -630,22 +708,49 @@ function resampleChartRecords(records, config, period) {
     .filter(record => Number.isFinite(record.timestamp))
     .filter(record => record.timestamp >= start && record.timestamp <= end)
     .sort((a, b) => a.timestamp - b.timestamp);
-  if (!sorted.length) return generateMockChartSeries(period);
-  if (sorted.length === 1) {
-    return Array.from({ length: config.chartPoints }, (_, index) => ({
-      ...sorted[0],
-      recorded_at: new Date(start + index * (end - start) / Math.max(config.chartPoints - 1, 1)).toISOString(),
-    }));
-  }
-
+  if (!sorted.length) return [];
   const step = (end - start) / Math.max(config.chartPoints - 1, 1);
+  const intervals = sorted
+    .slice(1)
+    .map((record, index) => record.timestamp - sorted[index].timestamp)
+    .filter(interval => interval > 0);
+  const medianInterval = intervals.length
+    ? intervals.sort((a, b) => a - b)[Math.floor(intervals.length / 2)]
+    : step;
+  const maxDataGap = Math.max(step * 0.55, medianInterval * 3);
+
   return Array.from({ length: config.chartPoints }, (_, index) => {
     const timestamp = start + index * step;
+    const lastDataTimestamp = sorted[sorted.length - 1].timestamp;
+    if (timestamp > lastDataTimestamp) {
+      return {
+        recorded_at: new Date(timestamp).toISOString(),
+        water_level: null,
+        distance_cm: null,
+        pump_in: null,
+        pump_out: null,
+      };
+    }
+
     let right = sorted.findIndex(record => record.timestamp >= timestamp);
     if (right < 0) right = sorted.length - 1;
     const left = Math.max(0, right - 1);
     const before = sorted[left];
     const after = sorted[right];
+    const beforeDistance = Math.abs(timestamp - before.timestamp);
+    const afterDistance = Math.abs(after.timestamp - timestamp);
+    const nearest = beforeDistance <= afterDistance ? before : after;
+    const nearestDistance = Math.min(beforeDistance, afterDistance);
+    if (nearestDistance > maxDataGap) {
+      return {
+        recorded_at: new Date(timestamp).toISOString(),
+        water_level: null,
+        distance_cm: null,
+        pump_in: null,
+        pump_out: null,
+      };
+    }
+
     const ratio = after.timestamp === before.timestamp
       ? 0
       : (timestamp - before.timestamp) / (after.timestamp - before.timestamp);
@@ -754,6 +859,11 @@ function renderPumpTimeline(records, config) {
   const segWidth = (100 / Math.max(pts.length, 1)).toFixed(2) + '%';
   const isLongPeriod = config.minutes >= 10080;
   const tooltip = getPumpTimelineTooltip();
+  const hideTimelineTooltip = () => {
+    tooltip.hidden = true;
+  };
+  inTrack.addEventListener('mouseleave', hideTimelineTooltip);
+  outTrack.addEventListener('mouseleave', hideTimelineTooltip);
 
   pts.forEach(r => {
     // Bơm IN
@@ -810,7 +920,28 @@ function getPumpTimelineTooltip() {
     tooltip.id = 'pump-timeline-tooltip';
     tooltip.className = 'pump-timeline-tooltip';
     tooltip.hidden = true;
+    tooltip.style.display = 'none';
     document.body.appendChild(tooltip);
+  }
+  if (!tooltip.dataset.outsideHandlerAttached) {
+    document.addEventListener('pointermove', event => {
+      if (!event.target.closest('.track-segment')) {
+        hidePumpTimelineTooltip();
+      }
+    });
+    document.addEventListener('mouseout', event => {
+      const nextTarget = event.relatedTarget;
+      if (!nextTarget || !nextTarget.closest?.('.track-segment')) {
+        hidePumpTimelineTooltip();
+      }
+    });
+    window.addEventListener('blur', () => {
+      hidePumpTimelineTooltip();
+    });
+    document.addEventListener('pointerleave', () => {
+      hidePumpTimelineTooltip();
+    });
+    tooltip.dataset.outsideHandlerAttached = 'true';
   }
   return tooltip;
 }
@@ -843,6 +974,7 @@ function attachPumpTimelineTooltip(segment, details) {
       index === 0 ? `<strong>${line}</strong>` : `<span>${line}</span>`
     ).join('');
     tooltip.hidden = false;
+    tooltip.style.display = 'flex';
     move(event);
   };
   const move = event => {
@@ -850,12 +982,13 @@ function attachPumpTimelineTooltip(segment, details) {
     tooltip.style.top = `${event.clientY + 12}px`;
   };
   const hide = () => {
-    tooltip.hidden = true;
+    hidePumpTimelineTooltip();
   };
 
   segment.addEventListener('mouseenter', show);
   segment.addEventListener('mousemove', move);
   segment.addEventListener('mouseleave', hide);
+  segment.addEventListener('pointerleave', hide);
 }
 
 function formatPumpTime(date) {
@@ -927,9 +1060,25 @@ function formatChartTooltipTimestamp(timestamp, isMarker, displayNow) {
 }
 
 function updateChartStats(records) {
-  if (!records || !records.length) return;
-  const levels = records.map(r => +r.water_level);
-  const dists  = records.map(r => +r.distance_cm);
+  if (!records || !records.length) {
+    setText('chart-stat-max', '--');
+    setText('chart-stat-max-time', '--');
+    setText('chart-stat-min', '--');
+    setText('chart-stat-min-time', '--');
+    setText('chart-stat-avg', '--');
+    setText('chart-stat-dist', '--');
+    return;
+  }
+  const validRecords = records.filter(record =>
+    Number.isFinite(Number(record.water_level))
+    && Number.isFinite(Number(record.distance_cm))
+  );
+  if (!validRecords.length) {
+    updateChartStats([]);
+    return;
+  }
+  const levels = validRecords.map(r => +r.water_level);
+  const dists  = validRecords.map(r => +r.distance_cm);
 
   let maxLvl = levels[0], minLvl = levels[0];
   let maxIdx = 0, minIdx = 0;
@@ -944,13 +1093,17 @@ function updateChartStats(records) {
 
   const avgLvl  = (sumLvl / levels.length).toFixed(1);
   const avgDist = (sumDist / levels.length).toFixed(1);
-  const maxTime = (records[maxIdx]?.recorded_at || '21:42:15').slice(11, 19);
-  const minTime = (records[minIdx]?.recorded_at || '21:17:08').slice(11, 19);
+  const maxTime = validRecords[maxIdx]?.recorded_at
+    ? formatChartTimestamp(validRecords[maxIdx].recorded_at).slice(11, 19)
+    : '--';
+  const minTime = validRecords[minIdx]?.recorded_at
+    ? formatChartTimestamp(validRecords[minIdx].recorded_at).slice(11, 19)
+    : '--';
 
   setText('chart-stat-max', `${maxLvl.toFixed(1)} %`);
-  setText('chart-stat-max-time', `(${maxTime})`);
+  setText('chart-stat-max-time', maxTime === '--' ? '--' : `(${maxTime})`);
   setText('chart-stat-min', `${minLvl.toFixed(1)} %`);
-  setText('chart-stat-min-time', `(${minTime})`);
+  setText('chart-stat-min-time', minTime === '--' ? '--' : `(${minTime})`);
   setText('chart-stat-avg', `${avgLvl} %`);
   setText('chart-stat-dist', `${avgDist} cm`);
 }
@@ -1011,11 +1164,19 @@ function updateChartPeriodInfo(period, range = null) {
 //  PAGE 3: ĐIỀU KHIỂN (Control Page)
 // ══════════════════════════════════════════════════════════════════════════════
 let currentControlLogFilter = '';
+let pendingMode = null;
+let pendingModeAt = 0;
 
 async function loadControlPage() {
   try {
     const status = await safeAPI.status();
-    const rec = status.last_record || {};
+    const rec = getLatestRecord(status);
+    if (pendingMode && rec.auto_mode === (pendingMode === 'AUTO' ? 1 : 0)) {
+      pendingMode = null;
+    } else if (pendingMode && Date.now() - pendingModeAt > 5000) {
+      pendingMode = null;
+    }
+    if (pendingMode) rec.auto_mode = pendingMode === 'AUTO' ? 1 : 0;
 
     // 1. Cập nhật 4 thẻ trạng thái trên cùng
     setText('ctrl-ov-level', fmt.pct(rec.water_level != null ? rec.water_level : 45.5));
@@ -1059,9 +1220,19 @@ async function loadControlPage() {
 async function setMode(mode) {
   try {
     const res = await safeAPI.control('mode', mode);
+    pendingMode = mode;
+    pendingModeAt = Date.now();
+    const isAuto = mode === 'AUTO';
+    const cardAuto = document.getElementById('mode-card-auto');
+    const cardManual = document.getElementById('mode-card-manual');
+    if (cardAuto && cardManual) {
+      cardAuto.className = `mode-select-card${isAuto ? ' active' : ''}`;
+      cardManual.className = `mode-select-card${isAuto ? '' : ' active manual-active'}`;
+    }
+    setText('ctrl-ov-mode', mode);
     updateFeedback('mode', mode);
     toast(`Đã gửi lệnh chuyển sang chế độ ${mode}`, 'success');
-    setTimeout(loadControlPage, 600);
+    setTimeout(loadControlPage, 2200);
   } catch (e) {
     toast('Lỗi khi gửi lệnh chế độ', 'error');
   }
@@ -1137,12 +1308,13 @@ function updateFeedback(cmdType, val) {
   setText('feedback-result', 'Kết quả: Thành công');
 }
 
-async function loadControlLogsTable() {
+async function loadControlLogsTable(page = ctrlLogPage) {
   const tbody = document.getElementById('ctrl-log-tbody');
   if (!tbody) return;
 
+  ctrlLogPage = page;
   const devFilter = document.getElementById('ctrl-log-device')?.value || '';
-  const data = await safeAPI.controlLogs({ limit: 20 });
+  const data = await safeAPI.controlLogs({ page, limit: 10 });
   let rows = data.data || [];
 
   if (devFilter) {
@@ -1176,7 +1348,12 @@ async function loadControlLogsTable() {
   setText('ctrl-log-total-info', `Tổng: ${data.total || rows.length} bản ghi`);
 
   // Render pagination controls
-  renderPagination('ctrl-log-pages', 1, Math.ceil((data.total || rows.length) / 5) || 1, () => {});
+  renderPagination(
+    'ctrl-log-pages',
+    ctrlLogPage,
+    Math.ceil((data.total || rows.length) / 10) || 1,
+    loadControlLogsTable
+  );
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1325,14 +1502,33 @@ function viewAlert(id, msg) {
 //  PAGE 6: LỊCH SỬ DỮ LIỆU
 // ══════════════════════════════════════════════════════════════════════════════
 let histPreset = 'today';
+let historyTab = 'sensor';
+let logPage = 1;
+
+function switchHistoryTab(tab, btn) {
+  historyTab = tab;
+  document.querySelectorAll('.history-tab').forEach(item => item.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  const sensorPanel = document.getElementById('history-sensor-panel');
+  const logsPanel = document.getElementById('history-logs-panel');
+  if (sensorPanel) sensorPanel.style.display = tab === 'sensor' ? '' : 'none';
+  if (logsPanel) logsPanel.style.display = tab === 'logs' ? '' : 'none';
+  if (tab === 'logs') loadSystemLogs();
+  else loadHistory();
+}
+
+function getLocalDateString(date = new Date()) {
+  const pad = value => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
 
 function setHistoryPreset(preset, btn) {
   histPreset = preset;
-  document.querySelectorAll('.tab-bar .tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('#history-sensor-panel .tab-bar .tab-btn').forEach(b => b.classList.remove('active'));
   if (btn) btn.classList.add('active');
 
-  const today = new Date().toISOString().slice(0,10);
-  const pastN = days => new Date(Date.now() - days*86400000).toISOString().slice(0,10);
+  const today = getLocalDateString();
+  const pastN = days => getLocalDateString(new Date(Date.now() - days * 86400000));
 
   const fromEl = document.getElementById('hist-from');
   const toEl   = document.getElementById('hist-to');
@@ -1347,6 +1543,16 @@ function setHistoryPreset(preset, btn) {
   loadHistory();
 }
 
+function applyHistoryFilter() {
+  histPage = 1;
+  loadHistory();
+}
+
+function changeHistoryLimit() {
+  histPage = 1;
+  loadHistory();
+}
+
 async function loadHistory(page = histPage) {
   histPage = page;
   const from  = document.getElementById('hist-from')?.value;
@@ -1354,9 +1560,16 @@ async function loadHistory(page = histPage) {
   const limit = parseInt(document.getElementById('hist-limit')?.value || 20);
 
   const params = { page, limit };
-  if (from) params.from = from;
-  if (to)   params.to   = to;
-  if (!from && !to) params.minutes = 1440;
+  if (histPreset === 'all' && !from && !to) {
+    // Dùng khoảng ngày mở rộng để tương thích với backend cũ chưa hỗ trợ
+    // tham số `all`; sau khi backend mới chạy, `all=1` vẫn được hỗ trợ.
+    params.from = '1970-01-01';
+    params.to = getLocalDateString();
+    params.all = 1;
+  } else {
+    if (from) params.from = from;
+    if (to)   params.to   = to;
+  }
 
   try {
     const data = await safeAPI.sensor(params);
@@ -1365,7 +1578,7 @@ async function loadHistory(page = histPage) {
     if (!tbody) return;
 
     if (!rows.length) {
-      tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:30px" class="text-muted">Không có dữ liệu</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:30px" class="text-muted">Không có dữ liệu</td></tr>';
     } else {
       tbody.innerHTML = rows.map(r =>
         `<tr>
@@ -1375,7 +1588,6 @@ async function loadHistory(page = histPage) {
            <td>${pumpBadge(r.pump_in)}</td>
            <td>${pumpBadge(r.pump_out)}</td>
            <td>${modeBadge(r.auto_mode)}</td>
-           <td>${r.rssi || '--'}</td>
            <td>${r.sensor_err ? '<span class="text-danger">Lỗi</span>' : '<span class="text-success">OK</span>'}</td>
          </tr>`
       ).join('');
@@ -1392,7 +1604,7 @@ async function loadHistory(page = histPage) {
 function exportCSV() {
   const rows = document.querySelectorAll('#hist-tbody tr');
   if (!rows.length) { toast('Không có dữ liệu để xuất', 'warning'); return; }
-  const headers = ['Thời gian','Mực nước (%)','Khoảng cách (cm)','Bơm cấp','Bơm thoát','Chế độ','RSSI','Lỗi'];
+  const headers = ['Thời gian','Mực nước (%)','Khoảng cách (cm)','Bơm cấp','Bơm thoát','Chế độ','Lỗi'];
   let csv = headers.join(',') + '\n';
   rows.forEach(row => {
     const cells = [...row.querySelectorAll('td')].map(td => `"${td.innerText.trim()}"`);
@@ -1411,7 +1623,7 @@ function exportCSV() {
 function exportExcel() {
   const rows = document.querySelectorAll('#hist-tbody tr');
   if (!rows.length) { toast('Không có dữ liệu để xuất', 'warning'); return; }
-  const headers = ['Thời gian','Mực nước (%)','Khoảng cách (cm)','Bơm cấp','Bơm thoát','Chế độ','RSSI','Lỗi'];
+  const headers = ['Thời gian','Mực nước (%)','Khoảng cách (cm)','Bơm cấp','Bơm thoát','Chế độ','Lỗi'];
   let tableHtml = '<table border="1"><tr>' + headers.map(h => `<th style="background:#2563eb;color:#fff;font-weight:bold">${h}</th>`).join('') + '</tr>';
   rows.forEach(row => {
     const cells = [...row.querySelectorAll('td')].map(td => `<td>${td.innerText.trim()}</td>`);
@@ -1429,77 +1641,93 @@ function exportExcel() {
   toast('Đã xuất Excel thành công', 'success');
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-//  PAGE 7: THÔNG TIN HỆ THỐNG
-// ══════════════════════════════════════════════════════════════════════════════
-async function loadSystemInfo() {
-  try {
-    const [status, logsData] = await Promise.all([safeAPI.status(), safeAPI.logs({ limit:10 })]);
-    const rec = status.last_record || {};
-    const cfg = status.config || {};
-
-    setText('sys-uptime',        fmt.uptime(rec.uptime_sec));
-    setText('sys-rssi',          fmt.rssi(rec.rssi));
-    setText('sys-mode',          rec.auto_mode ? 'AUTO' : 'MANUAL');
-    setText('sys-fault',         rec.fault_code || 'none');
-    setText('sys-last-data',     fmt.dt(rec.recorded_at));
-    setText('sys-total-records', (status.total_records || '--').toLocaleString());
-    setText('sys-server-time',   fmt.dt(status.server_time));
-    setText('sys-web-version',   cfg.web_version || '1.0.0');
-    setText('sys-mqtt-broker',   `${cfg.mqtt_broker || '--'}:${cfg.mqtt_port || 1883}`);
-    setText('sys-mqtt-topic',    cfg.topic_prefix || '--');
-    setText('sys-topic-data',    (cfg.topic_prefix || '--') + '/data');
-    setText('sys-topic-cmd',     (cfg.topic_prefix || '--') + '/cmd/#');
-
-    const sensorOk = !rec.sensor_err;
-    const sensorEl = document.getElementById('sys-sensor-err');
-    if (sensorEl) sensorEl.innerHTML = sensorOk
-      ? '<span class="badge badge-success">OK</span>'
-      : '<span class="badge badge-danger">Lỗi</span>';
-
-    const isOnline = status.esp32_status === 'online';
-    const esp32El  = document.getElementById('sys-esp32-status');
-    if (esp32El) esp32El.innerHTML = isOnline
-      ? '<span class="badge badge-success">Online</span>'
-      : '<span class="badge badge-danger">Offline</span>';
-
-    const mqttEl = document.getElementById('sys-mqtt-status');
-    if (mqttEl) mqttEl.innerHTML = status.mqtt_connected
-      ? '<span class="badge badge-success">Đã kết nối</span>'
-      : '<span class="badge badge-danger">Mất kết nối</span>';
-
-    // Logs
-    const logList = document.getElementById('sys-log-list');
-    if (logList) {
-      const logs = logsData.data || [];
-      const icons = { INFO:'ℹ️', WARNING:'⚠️', ERROR:'❌', DEBUG:'🔍', CRITICAL:'🚨' };
-      if (!logs.length) {
-        logList.innerHTML = '<div class="log-row text-muted">Chưa có nhật ký</div>';
-      } else {
-        logList.innerHTML = logs.map(l =>
-          `<div class="log-row">
-             <span class="log-time">${fmt.dt(l.logged_at).slice(11,19)}</span>
-             <span class="log-text">${icons[l.log_level]||'ℹ️'} ${l.message}</span>
-           </div>`
-        ).join('');
-      }
-    }
-
-  } catch(e) { console.error('loadSystemInfo error:', e); }
+function logLevelBadge(level) {
+  const normalized = String(level || 'INFO').toUpperCase();
+  const classes = { INFO: 'info', SUCCESS: 'success', WARNING: 'warning', ERROR: 'danger' };
+  return `<span class="badge badge-${classes[normalized] || 'gray'}">${normalized}</span>`;
 }
 
-async function loadSysLogs() {
-  const data = await safeAPI.logs({ limit: 10 });
-  const logList = document.getElementById('sys-log-list');
-  if (!logList) return;
-  const icons = { INFO:'ℹ️', WARNING:'⚠️', ERROR:'❌', DEBUG:'🔍', CRITICAL:'🚨' };
-  const logs = data.data || [];
-  logList.innerHTML = logs.map(l =>
-    `<div class="log-row">
-       <span class="log-time">${fmt.dt(l.logged_at).slice(11,19)}</span>
-       <span class="log-text">${icons[l.log_level]||'ℹ️'} ${l.message}</span>
-     </div>`
-  ).join('') || '<div class="log-row text-muted">Chưa có nhật ký</div>';
+function logComponentName(component) {
+  const names = { mqtt: 'MQTT', flask: 'Hệ thống', esp32: 'ESP32', sensor: 'Cảm biến', system: 'Hệ thống' };
+  return names[String(component || '').toLowerCase()] || component || '--';
+}
+
+function applyLogFilter() {
+  logPage = 1;
+  loadSystemLogs();
+}
+
+function changeLogLimit() {
+  logPage = 1;
+  loadSystemLogs();
+}
+
+async function loadSystemLogs(page = logPage) {
+  logPage = page;
+  const params = {
+    page,
+    limit: parseInt(document.getElementById('log-limit')?.value || 15),
+  };
+  const from = document.getElementById('log-from')?.value;
+  const to = document.getElementById('log-to')?.value;
+  const level = document.getElementById('log-level')?.value;
+  const component = document.getElementById('log-component')?.value;
+  if (from) params.from = from;
+  if (to) params.to = to;
+  if (level) params.level = level;
+  if (component) params.component = component;
+
+  try {
+    const data = await safeAPI.logs(params);
+    const rows = data.data || [];
+    const tbody = document.getElementById('log-tbody');
+    if (!tbody) return;
+    tbody.innerHTML = rows.length
+      ? rows.map(log => `<tr>
+          <td style="font-size:12px;color:var(--accent);white-space:nowrap">${fmt.dt(log.logged_at)}</td>
+          <td>${logLevelBadge(log.log_level)}</td>
+          <td>${logComponentName(log.component)}</td>
+          <td>${log.message || '--'}</td>
+        </tr>`).join('')
+      : '<tr><td colspan="4" style="text-align:center;padding:30px" class="text-muted">Không có nhật ký trong khoảng thời gian này</td></tr>';
+
+    const limit = params.limit;
+    const total = data.total || 0;
+    setText('log-info', `Hiển thị ${rows.length} / Tổng: ${total} bản ghi`);
+    renderPagination('log-pages', logPage, Math.ceil(total / limit) || 1, loadSystemLogs);
+  } catch (e) {
+    console.error('loadSystemLogs error:', e);
+  }
+}
+
+function exportLogsCSV() {
+  const rows = document.querySelectorAll('#log-tbody tr');
+  if (!rows.length) { toast('Không có nhật ký để xuất', 'warning'); return; }
+  const headers = ['Thời gian', 'Mức độ', 'Thành phần', 'Nội dung'];
+  let csv = headers.join(',') + '\n';
+  rows.forEach(row => {
+    csv += [...row.querySelectorAll('td')].map(td => `"${td.innerText.trim().replaceAll('"', '""')}"`).join(',') + '\n';
+  });
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `nhat_ky_he_thong_${getLocalDateString()}.csv`; a.click();
+  URL.revokeObjectURL(url);
+  toast('Đã xuất nhật ký CSV', 'success');
+}
+
+function exportLogsExcel() {
+  const rows = document.querySelectorAll('#log-tbody tr');
+  if (!rows.length) { toast('Không có nhật ký để xuất', 'warning'); return; }
+  const headers = ['Thời gian', 'Mức độ', 'Thành phần', 'Nội dung'];
+  const body = [...rows].map(row => '<tr>' + [...row.querySelectorAll('td')].map(td => `<td>${td.innerText.trim()}</td>`).join('') + '</tr>').join('');
+  const html = `<table border="1"><tr>${headers.map(h => `<th style="background:#2563eb;color:#fff">${h}</th>`).join('')}</tr>${body}</table>`;
+  const blob = new Blob(['\uFEFF' + html], { type: 'application/vnd.ms-excel;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `nhat_ky_he_thong_${getLocalDateString()}.xls`; a.click();
+  URL.revokeObjectURL(url);
+  toast('Đã xuất nhật ký Excel', 'success');
 }
 
 // ── DOM helpers ───────────────────────────────────────────────────────────────
@@ -1522,9 +1750,8 @@ function escapeHtml(s) {
 function startAutoRefresh() {
   autoRefreshTimer = setInterval(() => {
     if (currentPage === 'tong-quan') loadOverview();
-    if (currentPage === 'bieu-do')   loadChart(currentChartPeriod);
+    if (currentPage === 'tong-quan') loadChart(currentChartPeriod);
     if (currentPage === 'dieu-khien')loadControlPage();
-    if (currentPage === 'he-thong')  loadSystemInfo();
   }, 5000);
 }
 
@@ -1534,11 +1761,15 @@ function startAutoRefresh() {
   setInterval(updateClock, 1000);
 
   // Set today's dates for history filters
-  const today = new Date().toISOString().slice(0,10);
+  const today = getLocalDateString();
   const histFrom = document.getElementById('hist-from');
   const histTo   = document.getElementById('hist-to');
   if (histFrom) histFrom.value = today;
   if (histTo)   histTo.value   = today;
+  const logFrom = document.getElementById('log-from');
+  const logTo   = document.getElementById('log-to');
+  if (logFrom) logFrom.value = today;
+  if (logTo) logTo.value = today;
 
   loadOverview();
   startAutoRefresh();

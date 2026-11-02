@@ -416,11 +416,47 @@ tbody tr:hover { background: #f8fafc; }
 }
 .filter-label { font-size: 12.5px; color: var(--text-secondary); white-space: nowrap; }
 
+/* ── History tabs ─────────────────────────────────────────────────────────── */
+.history-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.history-tab {
+  height: 44px;
+  border: 1px solid #dbe5f2;
+  border-radius: 10px;
+  background: #eef4fb;
+  color: #172554;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+.history-tab span { margin-right: 10px; font-size: 20px; }
+.history-tab.active {
+  background: linear-gradient(90deg, #1478f2, #0879ed);
+  color: #fff;
+  border-color: #1478f2;
+  box-shadow: 0 3px 8px rgba(37,99,235,.25);
+}
+.history-tab:hover:not(.active) { background: #e2ebf7; }
+
 /* ── Grid Layouts ──────────────────────────────────────────────────────────── */
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
 .grid-7-3 { display: grid; grid-template-columns: 7fr 3fr; gap: 16px; }
 .grid-6-4 { display: grid; grid-template-columns: 6fr 4fr; gap: 16px; }
+.dashboard-overview-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(300px, 1fr);
+  gap: 16px;
+}
+.dashboard-overview-grid main,
+.overview-side { min-width: 0; }
+.overview-side { display: flex; flex-direction: column; }
+.overview-stats-card { margin-bottom: 16px; }
 
 /* ── Chart Container ───────────────────────────────────────────────────────── */
 .chart-container { position: relative; width: 100%; min-height: 240px; height: 260px; }
@@ -1144,6 +1180,7 @@ tbody tr:hover { background: #f8fafc; }
   .stat-grid  { grid-template-columns: repeat(2,1fr); }
   .grid-7-3   { grid-template-columns: 1fr; }
   .grid-6-4   { grid-template-columns: 1fr; }
+  .dashboard-overview-grid { grid-template-columns: 1fr; }
   .info-grid  { grid-template-columns: 1fr; }
   .stat-summary-grid { grid-template-columns: repeat(2, 1fr); }
 }

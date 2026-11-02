@@ -61,15 +61,22 @@ const demo = {
   sensor(params = {}) {
     const minutes = Number(params.minutes || 30);
     const pointMap = { 30: 180, 60: 120, 360: 120, 10080: 168, 43200: 120 };
-    const points = pointMap[minutes] || Math.min(Number(params.limit) || 50, 500);
+    const limit = Math.max(Number(params.limit) || 50, 1);
+    const page = Math.max(Number(params.page) || 1, 1);
+    const total = pointMap[minutes] || 500;
+    const isPaginated = params.page != null || params.limit != null;
+    const rangeMinutes = params.all ? 43200 : minutes;
+    const points = isPaginated ? Math.min(limit, Math.max(total - (page - 1) * limit, 0)) : total;
+    const startIndex = isPaginated ? (page - 1) * limit : 0;
     const rows = [];
     const now = Date.now();
     let lvl = 36.7;
     for (let i = 0; i < points; i++) {
       lvl += (Math.random() - 0.3) * 2.5;
       lvl  = Math.max(5, Math.min(95, lvl));
+      const sampleIndex = startIndex + i;
       rows.push({
-        recorded_at: new Date(now - (points - 1 - i) * (minutes * 60000 / Math.max(points - 1, 1))).toISOString().slice(0,19),
+        recorded_at: new Date(now - (total - 1 - sampleIndex) * (rangeMinutes * 60000 / Math.max(total - 1, 1))).toISOString().slice(0,19),
         water_level: +lvl.toFixed(1),
         distance_cm: +(100 - lvl * 0.9).toFixed(1),
         pump_in:  lvl < 35 ? 1 : 0,
@@ -77,7 +84,7 @@ const demo = {
         auto_mode: 1, sensor_err: 0, rssi: -55,
       });
     }
-    return { ok:true, data:rows, total:rows.length, page:1, limit:500 };
+    return { ok:true, data:rows, total, page, limit };
   },
   alerts() {
     return {

@@ -77,18 +77,38 @@ def api_sensor():
     minutes   = int(request.args.get("minutes", 30))
     date_from = request.args.get("from")   # YYYY-MM-DD
     date_to   = request.args.get("to")
+    all_data  = request.args.get("all", "0") == "1"
     limit     = min(int(request.args.get("limit", 500)), 2000)
     page      = max(int(request.args.get("page", 1)), 1)
     offset    = (page - 1) * limit
 
-    if date_from and date_to:
+    if all_data:
+        rows = db.execute(
+            """SELECT * FROM sensor_data
+               ORDER BY recorded_at DESC LIMIT %s OFFSET %s""",
+            (limit, offset),
+            fetch="all",
+        )
+        cnt = db.execute(
+            "SELECT COUNT(*) AS c FROM sensor_data",
+            fetch="one",
+        )
+    elif date_from and date_to:
+        date_to_exclusive = (
+            datetime.strptime(date_to, "%Y-%m-%d") + timedelta(days=1)
+        ).strftime("%Y-%m-%d")
         sql = """SELECT * FROM sensor_data
-                 WHERE recorded_at BETWEEN %s AND %s
+                 WHERE recorded_at >= %s AND recorded_at < %s
                  ORDER BY recorded_at DESC LIMIT %s OFFSET %s"""
-        rows = db.execute(sql, (f"{date_from} 00:00:00", f"{date_to} 23:59:59", limit, offset), fetch="all")
+        rows = db.execute(
+            sql,
+            (f"{date_from} 00:00:00", f"{date_to_exclusive} 00:00:00", limit, offset),
+            fetch="all",
+        )
         cnt  = db.execute(
-            "SELECT COUNT(*) AS c FROM sensor_data WHERE recorded_at BETWEEN %s AND %s",
-            (f"{date_from} 00:00:00", f"{date_to} 23:59:59"), fetch="one"
+            "SELECT COUNT(*) AS c FROM sensor_data WHERE recorded_at >= %s AND recorded_at < %s",
+            (f"{date_from} 00:00:00", f"{date_to_exclusive} 00:00:00"),
+            fetch="one",
         )
     else:
         now = datetime.now()
@@ -101,7 +121,12 @@ def api_sensor():
         rows  = db.execute(sql, (since, now, limit), fetch="all")
         if latest and rows:
             rows.reverse()
-        cnt   = {"c": len(rows) if rows else 0}
+        cnt   = db.execute(
+            """SELECT COUNT(*) AS c FROM sensor_data
+               WHERE recorded_at >= %s AND recorded_at <= %s""",
+            (since, now),
+            fetch="one",
+        )
 
     return jsonify({
         "ok": True,
@@ -121,13 +146,15 @@ def api_alerts():
     status    = request.args.get("status", "")
     date_from = request.args.get("from")
     date_to   = request.args.get("to")
+    recent_hours = request.args.get("recent_hours")
     limit     = min(int(request.args.get("limit", 20)), 200)
     page      = max(int(request.args.get("page", 1)), 1)
     offset    = (page - 1) * limit
 
-    # Danh sách và các thẻ thống kê phải dùng cùng một cửa sổ 24 giờ.
+    # Các thẻ thống kê vẫn dùng cửa sổ 24 giờ; danh sách hiển thị toàn bộ
+    # lịch sử nếu người dùng chưa chọn bộ lọc ngày.
     stats_since = datetime.now() - timedelta(hours=24)
-    where, params = ["created_at >= %s"], [stats_since]
+    where, params = [], []
     if severity:
         where.append("severity = %s"); params.append(severity)
     if status:
@@ -136,6 +163,12 @@ def api_alerts():
         where.append("created_at >= %s"); params.append(f"{date_from} 00:00:00")
     if date_to:
         where.append("created_at <= %s"); params.append(f"{date_to} 23:59:59")
+    if recent_hours:
+        try:
+            recent_since = datetime.now() - timedelta(hours=float(recent_hours))
+        except ValueError:
+            return jsonify({"ok": False, "error": "recent_hours không hợp lệ"}), 400
+        where.append("created_at >= %s"); params.append(recent_since)
 
     where_sql = ("WHERE " + " AND ".join(where)) if where else ""
     rows = db.execute(
@@ -285,12 +318,21 @@ def api_logs():
     offset    = (page - 1) * limit
     component = request.args.get("component", "")
     level     = request.args.get("level", "")
+    date_from = request.args.get("from")
+    date_to   = request.args.get("to")
 
     where, params = [], []
     if component:
         where.append("component = %s"); params.append(component)
     if level:
         where.append("log_level = %s"); params.append(level)
+    if date_from:
+        where.append("logged_at >= %s"); params.append(f"{date_from} 00:00:00")
+    if date_to:
+        date_to_exclusive = (
+            datetime.strptime(date_to, "%Y-%m-%d") + timedelta(days=1)
+        ).strftime("%Y-%m-%d")
+        where.append("logged_at < %s"); params.append(f"{date_to_exclusive} 00:00:00")
     where_sql = ("WHERE " + " AND ".join(where)) if where else ""
 
     rows = db.execute(
