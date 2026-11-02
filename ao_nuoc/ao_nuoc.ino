@@ -35,32 +35,32 @@ const char* MQTT_HOST = "192.168.1.100";   // IP may chay Mosquitto (cung mang W
 const uint16_t MQTT_PORT = 1883;
 const char* MQTT_USER = "esp32";
 const char* MQTT_PASS = "esp32pass";       // trung voi tai khoan tren Mosquitto
-const char* P = "iot-ao-demo-123";         // tien to topic: DOI thanh chuoi rieng
+const char* P = "iot";         // tien to topic
 
 // ===================== CHAN KET NOI =====================
 #define TRIG_PIN       26
-#define ECHO_PIN       27                  // HC-SR04 echo 5V -> PHAI chia ap xuong 3.3V
+#define ECHO_PIN       27                  
 #define RELAY_IN_PIN   32                  // bom vao
 #define RELAY_OUT_PIN  33                  // bom ra
-#define LED_PIN        2                   // LED tren board: sang khi co canh bao
 
 const uint8_t RELAY_ON  = LOW;             // relay kich muc thap; doi thanh HIGH neu nguoc
 const uint8_t RELAY_OFF = (RELAY_ON == LOW) ? HIGH : LOW;
 
 // ===================== THAM SO MAC DINH (luu duoc vao flash) =====================
-const float DEF_D_EMPTY = 100.0;           // cm: khoang cach cam bien -> mat nuoc khi ao can (0%)
-const float DEF_D_FULL  = 10.0;            // cm: khi ao day (100%)
+const float DEF_D_EMPTY = 15;           // cm: khoang cach cam bien -> mat nuoc khi ao can (0%)
+const float DEF_D_FULL  = 9;            // cm: khi ao day (100%)
 const float DEF_IN_ON   = 30, DEF_IN_OFF  = 50;   // % : bom vao bat < 30, tat >= 50
 const float DEF_OUT_ON  = 90, DEF_OUT_OFF = 80;   // % : bom ra bat > 90, tat <= 80
 
 // ===================== THAM SO AN TOAN =====================
-const float LIMIT_HIGH = 95.0;             // % : >= thi cam / dung bom vao (chong tran)
-const float LIMIT_LOW  = 5.0;              // % : <= thi cam / dung bom ra (chong chay can)
-const unsigned long MAX_RUN_MS      = 20UL * 60UL * 1000UL;  // bom chay lien tuc toi da
+const float LIMIT_HIGH = 95.0;             // % : >= khong bom vao (chong tran)
+const float LIMIT_LOW  = 5.0;              // % : <= khong bom ra (chong chay can)                                   (CHECK)
+const unsigned long MAX_RUN_MS      = 20UL * 60UL * 1000UL;  // bom chay lien tuc toi da 
 const unsigned long SWITCH_DELAY_MS = 3000UL;                // nghi giua 2 bom khi doi chieu
-const unsigned long MIN_REST_MS     = 10000UL;               // nghi toi thieu truoc khi bat lai (tu dong)
+const unsigned long MIN_REST_MS     = 3000UL;               // nghi toi thieu truoc khi bat lai
 const unsigned long NOFLOW_MS       = 120000UL;              // sau 2 phut ma muc nuoc khong doi -> loi
 const float         NOFLOW_MIN_PCT  = 0.5;                   // muc nuoc phai doi it nhat 0.5%
+const uint8_t NOFLOW_CONFIRM_COUNT = 2;                      // So chu ky khong dat lien tiep de xac nhan loi
 const unsigned long MANUAL_FAILSAFE_MS = 120000UL;           // mat MQTT 2 phut o che do tay -> ve AUTO
 const unsigned long MEASURE_MS = 2000UL;
 const unsigned long PUBLISH_MS = 2000UL;
@@ -85,13 +85,14 @@ bool pumpOn[2] = { false, false };
 unsigned long pumpStart[2] = { 0, 0 }, pumpStop[2] = { 0, 0 };
 unsigned long flowRefT[2] = { 0, 0 };
 float flowRefL[2] = { 0, 0 };
+uint8_t noFlowCount[2] = { 0, 0 };
 
 bool autoMode = true;
 bool haveLevel = false;
 bool sensorErr = false;
 bool fault = false;                        // loi chot, can lenh reset
 const char* faultMsg = "none";
-float level = 0, dist = 0;
+float level = 0, dist = 0;                // level: muc nuoc (%), dist: khoang cach (cm)
 int badCount = 0, goodCount = 0;
 
 bool aSensor = false, aHigh = false, aLow = false;   // trang thai canh bao (de bao 1 lan)
@@ -99,7 +100,7 @@ bool dirty = true;                         // can gui data ngay
 unsigned long lastMeasure = 0, lastPub = 0, lastMqttOk = 0;
 const char* rejectReason = "";
 
-// ===================== TIEN ICH MQTT =====================
+// ===================== MQTT =====================
 void pub(const char* sub, const char* payload, bool retain = false) {
   if (!mqtt.connected()) return;
   char tp[96];
@@ -191,6 +192,7 @@ const char* canStart(int p) {
   if (sensorErr)             return "sensor_error";
   if (!haveLevel)            return "no_level";
   if (pumpOn[o])             return "interlock";
+  if (millis() - pumpStop[p] < MIN_REST_MS) return "min_rest";
   if (millis() - pumpStop[o] < SWITCH_DELAY_MS) return "switch_delay";
   if (p == PUMP_IN  && level >= LIMIT_HIGH) return "high_limit";
   if (p == PUMP_OUT && level <= LIMIT_LOW)  return "low_limit";
@@ -206,14 +208,35 @@ bool setPump(int p, bool on) {
   pumpOn[p] = on;
   digitalWrite(RELAY_PIN[p], on ? RELAY_ON : RELAY_OFF);
   unsigned long now = millis();
-  if (on) { pumpStart[p] = now; flowRefT[p] = now; flowRefL[p] = level; }
-  else    { pumpStop[p] = now; }
+  if (on) {
+    pumpStart[p] = now;
+    // Ghi nhan moc kiem tra dong chay
+    flowRefT[p] = now;
+    flowRefL[p] = level;
+    noFlowCount[p] = 0; // Reset bo dem loi
+  } else {
+    pumpStop[p] = now;
+    noFlowCount[p] = 0; // Xoa bo dem khi bom dung
+  }
   dirty = true;
   Serial.printf("[PUMP] %s -> %s\n", PUMP_NAME[p], on ? "ON" : "OFF");
   return true;
 }
 
 void stopAll() { setPump(PUMP_IN, false); setPump(PUMP_OUT, false); }
+
+void changeMode(bool toAuto) {
+  stopAll();
+  autoMode = toAuto;
+  dirty = true;
+  if (autoMode) {
+    Serial.println("[MODE] Switched to AUTO");
+    ack("ok:mode=AUTO");
+  } else {
+    Serial.println("[MODE] Switched to MANUAL");
+    ack("ok:mode=MANUAL");
+  }
+}
 
 void setFault(const char* code, const char* msg) {
   stopAll();
@@ -232,8 +255,8 @@ void onMsg(char* t, byte* b, unsigned int n) {
   String s(t);
 
   if (s.endsWith("/cmd/mode")) {
-    if (m == "AUTO")        { autoMode = true;  ack("ok:mode=AUTO"); }
-    else if (m == "MANUAL") { autoMode = false; stopAll(); ack("ok:mode=MANUAL"); }
+    if (m == "AUTO")        { changeMode(true); }
+    else if (m == "MANUAL") { changeMode(false); }
     else ack("err:mode");
     dirty = true;
   }
@@ -245,14 +268,14 @@ void onMsg(char* t, byte* b, unsigned int n) {
     else { char b2[48]; snprintf(b2, sizeof(b2), "rejected:%s", rejectReason); ack(b2); }
     dirty = true;
   }
-  else if (s.endsWith("/cmd/threshold")) {
+  else if (s.endsWith("/cmd/threshold")) {          // chinh nguong bat/tat
     float a, b2, c, d;
     if (sscanf(m.c_str(), "%f,%f,%f,%f", &a, &b2, &c, &d) == 4 && thresholdValid(a, b2, c, d)) {
       cfg.inOn = a; cfg.inOff = b2; cfg.outOn = c; cfg.outOff = d;
       saveCfg(); publishCfg(); ack("ok:threshold");
     } else ack("err:threshold (can inOn<inOff<outOff<outOn, 0..100)");
   }
-  else if (s.endsWith("/cmd/calib_empty") || s.endsWith("/cmd/calib_full")) {
+  else if (s.endsWith("/cmd/calib_empty") || s.endsWith("/cmd/calib_full")) {        // chinh muc can/day
     bool isEmpty = s.endsWith("/cmd/calib_empty");
     float v = m.length() ? m.toFloat() : dist;
     if (v < 2 || v > 400 || (!m.length() && (!haveLevel || sensorErr))) { ack("err:calib"); return; }
@@ -260,19 +283,19 @@ void onMsg(char* t, byte* b, unsigned int n) {
     if (e - f < 5) { ack("err:calib (dEmpty phai > dFull it nhat 5cm)"); return; }
     cfg.dEmpty = e; cfg.dFull = f; saveCfg(); publishCfg(); ack("ok:calib");
   }
-  else if (s.endsWith("/cmd/calib")) {
+  else if (s.endsWith("/cmd/calib")) {             // chinh khoang cach can/day
     float e, f;
     if (sscanf(m.c_str(), "%f,%f", &e, &f) == 2 && f >= 2 && e <= 400 && e - f >= 5) {
       cfg.dEmpty = e; cfg.dFull = f; saveCfg(); publishCfg(); ack("ok:calib");
     } else ack("err:calib");
   }
-  else if (s.endsWith("/cmd/reset")) {
+  else if (s.endsWith("/cmd/reset")) {             // xoa loi chot va co canh bao
     fault = false; faultMsg = "none"; badCount = 0;
     aSensor = aHigh = aLow = false;
     ack("ok:reset"); dirty = true;
   }
-  else if (s.endsWith("/cmd/get")) { publishCfg(); dirty = true; }
-  else if (s.endsWith("/cmd/restart")) { ack("ok:restart"); mqtt.loop(); delay(300); ESP.restart(); }
+  else if (s.endsWith("/cmd/get")) { publishCfg(); dirty = true; }           // gui lai cau hinh
+  else if (s.endsWith("/cmd/restart")) { ack("ok:restart"); mqtt.loop(); delay(300); ESP.restart(); }        //khoi dong lai ESP32
 }
 
 // ===================== MANG =====================
@@ -288,7 +311,7 @@ void mqttConnect() {
     dirty = true;
     Serial.println("[MQTT] connected");
   } else {
-    Serial.printf("[MQTT] failed rc=%d\n", mqtt.state());
+    //Serial.printf("[MQTT] failed rc=%d\n", mqtt.state());
   }
 }
 
@@ -341,17 +364,31 @@ void safetyChecks() {
     if (!pumpOn[p]) continue;
     // chay qua thoi gian cho phep
     if (now - pumpStart[p] > MAX_RUN_MS) {
-      setFault("pump_overrun", "Bom chay qua thoi gian cho phep"); return;
+      setFault("pump_overrun", "Bom chay qua thoi gian cho phep"); 
+      return;
     }
     // khong co dong chay: muc nuoc khong thay doi sau NOFLOW_MS
     if (now - flowRefT[p] >= NOFLOW_MS) {
+      // Tinh muc nuoc thay doi theo huong mong doi
       float delta = (p == PUMP_IN) ? (level - flowRefL[p]) : (flowRefL[p] - level);
-      if (delta < NOFLOW_MIN_PCT) {
-        setFault(p == PUMP_IN ? "no_flow_in" : "no_flow_out",
-                 "Bom chay nhung muc nuoc khong doi (kiem tra bom/ong/nguon nuoc)");
+      if (delta >= NOFLOW_MIN_PCT) {
+        noFlowCount[p] = 0; // Bom co phan hoi tot
+        Serial.printf("[FLOW] %s OK, delta = %.2f%%\n", PUMP_NAME[p], delta);
+      } else {
+        noFlowCount[p]++; // Khong dat muc thay doi mong doi
+        Serial.printf("[FLOW] %s WARNING, delta = %.2f%%, count = %d\n", PUMP_NAME[p], delta, noFlowCount[p]);
+      }
+      // Cap nhat moc kiem tra cho chu ky tiep theo
+      flowRefT[p] = now;
+      flowRefL[p] = level;
+      // Chi xac nhan loi khi khong dat lien tiep 2 chu ky
+      if (noFlowCount[p] >= NOFLOW_CONFIRM_COUNT) {
+        setFault(
+          p == PUMP_IN ? "no_flow_in" : "no_flow_out",
+          "Bom chay nhung muc nuoc khong thay doi du sau nhieu chu ky"
+        );
         return;
       }
-      flowRefT[p] = now; flowRefL[p] = level;
     }
   }
 }
@@ -361,11 +398,11 @@ void autoControl() {
   unsigned long now = millis();
 
   if (!pumpOn[PUMP_IN]) {
-    if (level < cfg.inOn && now - pumpStop[PUMP_IN] >= MIN_REST_MS) setPump(PUMP_IN, true);
+    if (level < cfg.inOn) setPump(PUMP_IN, true);
   } else if (level >= cfg.inOff) setPump(PUMP_IN, false);
 
   if (!pumpOn[PUMP_OUT]) {
-    if (level > cfg.outOn && now - pumpStop[PUMP_OUT] >= MIN_REST_MS) setPump(PUMP_OUT, true);
+    if (level > cfg.outOn) setPump(PUMP_OUT, true);
   } else if (level <= cfg.outOff) setPump(PUMP_OUT, false);
 }
 
@@ -396,9 +433,15 @@ void setup() {
   Serial.begin(115200);
 
   // dat relay ve OFF TRUOC khi bat che do OUTPUT de tranh bom nhay luc khoi dong
-  for (int i = 0; i < 2; i++) { digitalWrite(RELAY_PIN[i], RELAY_OFF); pinMode(RELAY_PIN[i], OUTPUT); }
-  pinMode(TRIG_PIN, OUTPUT); pinMode(ECHO_PIN, INPUT);
-  pinMode(LED_PIN, OUTPUT);
+  //for (int i = 0; i < 2; i++) { digitalWrite(RELAY_PIN[i], RELAY_OFF); pinMode(RELAY_PIN[i], OUTPUT); }
+  pinMode(RELAY_IN_PIN, OUTPUT);
+  pinMode(RELAY_OUT_PIN, OUTPUT);
+
+  digitalWrite(RELAY_IN_PIN, RELAY_OFF);
+  digitalWrite(RELAY_OUT_PIN, RELAY_OFF);
+
+  pinMode(TRIG_PIN, OUTPUT); 
+  pinMode(ECHO_PIN, INPUT);
   for (int i = 0; i < 2; i++) pumpStop[i] = millis() - 60000UL;
 
   loadCfg();
@@ -436,6 +479,4 @@ void loop() {
 
   commFailsafe();
   if (dirty || millis() - lastPub >= PUBLISH_MS) publishData();
-
-  digitalWrite(LED_PIN, (fault || sensorErr || aHigh || aLow) ? HIGH : LOW);
 }
