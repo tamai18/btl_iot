@@ -16,6 +16,7 @@ _sqlite_path = os.path.join(os.path.dirname(__file__), "data.db")
 def init_db():
     global _db_type, _pool
     db_pref = os.getenv("DB_TYPE", "mysql").lower()
+    allow_fallback = os.getenv("DB_ALLOW_FALLBACK", "true").lower() == "true"
 
     if db_pref == "mysql":
         try:
@@ -23,7 +24,7 @@ def init_db():
             from mysql.connector import pooling
             _pool = pooling.MySQLConnectionPool(
                 pool_name="ao_pool",
-                pool_size=5,
+                pool_size=10,
                 host=os.getenv("DB_HOST", "localhost"),
                 port=int(os.getenv("DB_PORT", 3306)),
                 database=os.getenv("DB_NAME", "iot_ao_nuoi"),
@@ -37,48 +38,33 @@ def init_db():
             test_conn = _pool.get_connection()
             test_conn.close()
             _db_type = "mysql"
-            _migrate_alert_status()
             logger.info(">>> [DB] Kết nối thành công MySQL 8.x database: %s", os.getenv("DB_NAME", "iot_ao_nuoi"))
+            try:
+                _migrate_alert_status()
+            except Exception as me:
+                logger.warning("[DB] Migration cảnh báo: %s", me)
             return
         except Exception as e:
+            if not allow_fallback:
+                logger.error(">>> [DB LỖI] Không thể kết nối MySQL và DB_ALLOW_FALLBACK=false: %s", e)
+                raise
             logger.warning(">>> [DB] Không thể kết nối MySQL (%s). Tự động chuyển sang chế độ SQLite (data.db)...", e)
 
     # Chuyển sang SQLite fallback
     _db_type = "sqlite"
     _setup_sqlite_schema()
-    _migrate_alert_status()
+    try:
+        _migrate_alert_status()
+    except Exception as me:
+        logger.warning("[DB] Migration cảnh báo: %s", me)
     logger.info(">>> [DB] Đang hoạt động ở chế độ SQLite @ (%s)", _sqlite_path)
 
 def _migrate_alert_status():
-    """Chuẩn hóa trạng thái cảnh báo và hỗ trợ dữ liệu cũ dùng PENDING."""
-    if _db_type == "mysql":
-        conn = _pool.get_connection()
-        try:
-            cur = conn.cursor()
-            cur.execute(
-                "ALTER TABLE alerts MODIFY status "
-                "ENUM('PENDING','UNRESOLVED','RESOLVED') NOT NULL DEFAULT 'UNRESOLVED'"
-            )
-            conn.commit()
-        except Exception as e:
-            logger.warning("[DB] Không thể cập nhật ENUM alerts.status: %s", e)
-        finally:
-            conn.close()
+    """Chuẩn hóa trạng thái cảnh báo nếu còn trạng thái cũ."""
+    try:
         execute("UPDATE alerts SET status='UNRESOLVED' WHERE status='PENDING'")
-        conn = _pool.get_connection()
-        try:
-            cur = conn.cursor()
-            cur.execute(
-                "ALTER TABLE alerts MODIFY status "
-                "ENUM('UNRESOLVED','RESOLVED') NOT NULL DEFAULT 'UNRESOLVED'"
-            )
-            conn.commit()
-        except Exception as e:
-            logger.warning("[DB] Không thể loại bỏ trạng thái PENDING: %s", e)
-        finally:
-            conn.close()
-    else:
-        execute("UPDATE alerts SET status='UNRESOLVED' WHERE status='PENDING'")
+    except Exception:
+        pass
 
 def get_db_info():
     if _db_type is None:
@@ -177,9 +163,9 @@ def _setup_sqlite_schema():
         ('alert_led', '1', 'Đèn LED cảnh báo'),
         ('alert_buzzer', '1', 'Còi buzzer cảnh báo'),
         ('web_version', '1.0.0', 'Phiên bản Web Dashboard'),
-        ('mqtt_broker', os.getenv('MQTT_HOST', '127.0.0.1'), 'MQTT Broker IP'),
+        ('mqtt_broker', os.getenv('MQTT_DEVICE_HOST', '192.168.1.100'), 'MQTT Broker IP dùng cho ESP32'),
         ('mqtt_port', os.getenv('MQTT_PORT', '1883'), 'MQTT Broker Port'),
-        ('topic_prefix', os.getenv('MQTT_TOPIC_PREFIX', 'iot-ao-demo-123'), 'Tiền tố Topic MQTT'),
+        ('topic_prefix', os.getenv('MQTT_TOPIC_PREFIX', 'iot'), 'Tiền tố Topic MQTT'),
         ('language', 'vi', 'Ngôn ngữ hiển thị')
     ]
     cur.executemany("INSERT OR IGNORE INTO system_config (config_key, config_value, description) VALUES (?,?,?)", configs)
@@ -208,12 +194,12 @@ def _setup_sqlite_schema():
             INSERT INTO alerts (alert_code, message, severity, water_level, value_str, status)
             VALUES (?, ?, ?, ?, ?, ?)
         """, [
-            ('HIGH_LEVEL', 'Mực nước đạt 92% (nguy cơ tràn ao)', 'DANGER', 92.0, '92 %', 'UNRESOLVED'),
-            ('PUMP_IN_OFF', 'Máy bơm cấp đã tắt', 'WARNING', 50.5, None, 'RESOLVED'),
-            ('MODE', 'Chế độ MANUAL được kích hoạt', 'INFO', 43.2, None, 'RESOLVED'),
-            ('HIGH_TREND', 'Mực nước tăng nhanh', 'WARNING', 65.0, '+5.2 %/h', 'RESOLVED'),
-            ('SENSOR', 'Cảm biến đo không ổn định', 'WARNING', 40.0, None, 'RESOLVED'),
-            ('PUMP_IN', 'Máy bơm cấp đã bật', 'INFO', 28.5, None, 'RESOLVED')
+            ('high_level', 'Mực nước đạt 92% (nguy cơ tràn ao)', 'DANGER', 92.0, '92 %', 'UNRESOLVED'),
+            ('pump_in_off', 'Máy bơm cấp đã tắt', 'WARNING', 50.5, None, 'RESOLVED'),
+            ('mode', 'Chế độ MANUAL được kích hoạt', 'INFO', 43.2, None, 'RESOLVED'),
+            ('high_trend', 'Mực nước tăng nhanh', 'WARNING', 65.0, '+5.2 %/h', 'RESOLVED'),
+            ('sensor_error', 'Cảm biến đo không ổn định', 'WARNING', 40.0, None, 'RESOLVED'),
+            ('pump_in', 'Máy bơm cấp đã bật', 'INFO', 28.5, None, 'RESOLVED')
         ])
 
         cur.executemany("""
@@ -237,6 +223,8 @@ def execute(sql: str, params=None, fetch: str = "none"):
     if _db_type is None:
         init_db()
 
+    sql_upper = sql.strip().upper()
+
     if _db_type == "mysql":
         conn = _pool.get_connection()
         try:
@@ -246,7 +234,9 @@ def execute(sql: str, params=None, fetch: str = "none"):
                 return cur.fetchone()
             if fetch == "all":
                 return cur.fetchall()
-            return cur.lastrowid
+            if sql_upper.startswith("UPDATE") or sql_upper.startswith("DELETE"):
+                return cur.rowcount
+            return cur.lastrowid or cur.rowcount
         finally:
             conn.close()
     else:
@@ -266,6 +256,26 @@ def execute(sql: str, params=None, fetch: str = "none"):
             sql_lite = sql_lite.replace("DATE_SUB(recorded_at, INTERVAL 1 DAY)", "datetime(recorded_at, '-1 day')")
             sql_lite = re.sub(r"DATE_FORMAT\(([^,]+),\s*'[^']+'\)", r"strftime('%Y-%m-%d %H:%M', \1)", sql_lite)
 
+            # Chuyển đổi ON DUPLICATE KEY UPDATE cho system_config
+            if "ON DUPLICATE KEY UPDATE" in sql_lite.upper():
+                sql_lite = re.sub(
+                    r"ON DUPLICATE KEY UPDATE\s+.*",
+                    "ON CONFLICT(config_key) DO UPDATE SET config_value=excluded.config_value, updated_at=CURRENT_TIMESTAMP",
+                    sql_lite,
+                    flags=re.IGNORECASE | re.DOTALL
+                )
+
+            # Chuyển đổi UPDATE ... ORDER BY ... LIMIT cho SQLite
+            if "UPDATE" in sql_lite.upper() and "ORDER BY" in sql_lite.upper() and "LIMIT" in sql_lite.upper():
+                m = re.match(
+                    r"UPDATE\s+(\w+)\s+SET\s+(.+?)\s+WHERE\s+(.+?)\s+ORDER BY\s+(.+?)\s+LIMIT\s+(\d+)",
+                    sql_lite,
+                    flags=re.IGNORECASE | re.DOTALL
+                )
+                if m:
+                    tbl, set_cl, where_cl, order_cl, lim_cnt = m.groups()
+                    sql_lite = f"UPDATE {tbl} SET {set_cl} WHERE id IN (SELECT id FROM {tbl} WHERE {where_cl} ORDER BY {order_cl} LIMIT {lim_cnt})"
+
             cur.execute(sql_lite, params or ())
             if fetch == "one":
                 row = cur.fetchone()
@@ -274,6 +284,8 @@ def execute(sql: str, params=None, fetch: str = "none"):
                 rows = cur.fetchall()
                 return [dict(r) for r in rows]
             conn.commit()
-            return cur.lastrowid
+            if sql_upper.startswith("UPDATE") or sql_upper.startswith("DELETE"):
+                return cur.rowcount
+            return cur.lastrowid or cur.rowcount
         finally:
             conn.close()
