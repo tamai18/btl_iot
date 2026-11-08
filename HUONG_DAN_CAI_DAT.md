@@ -26,7 +26,7 @@
 | **Vi điều khiển** | ESP32 Dev Module (30 chân) | WiFi 2.4GHz, bộ nhớ Flash lưu cấu hình |
 | **Cảm biến** | HC-SR04 (Siêu âm) | Đo khoảng cách từ đỉnh ao đến mặt nước |
 | **Điều khiển** | Relay 2 kênh (Opto cách ly) | Bơm cấp (GPIO 32) và Bơm thoát (GPIO 33) |
-| **Giao thức** | MQTT (QoS 0/1, LWT, Retain) | Topic tiền tố: `iot-ao-demo-123` |
+| **Giao thức** | MQTT (QoS 0/1, LWT, Retain) | Topic tiền tố: `iot` |
 | **MQTT Broker** | Eclipse Mosquitto v2.x | Lắng nghe cổng `1883` |
 | **Kiểm thử MQTT**| MQTT Explorer | Giám sát và gửi thử tin nhắn MQTT |
 | **Backend** | Python 3.10+ (Flask, Paho-MQTT) | RESTful API, luồng nhận MQTT liên tục |
@@ -127,7 +127,7 @@ d:\btl iot\
   python esp32_simulator.py
   ```
 - **Bộ giả lập sẽ tự động:**
-  - Phát dữ liệu mực nước và khoảng cách cảm biến mỗi 2 giây lên topic `iot-ao-demo-123/data`.
+  - Phát dữ liệu mực nước và khoảng cách cảm biến mỗi 2 giây lên topic `iot/data`.
   - Tự động thay đổi mực nước khi bật bơm cấp (tăng dần) hoặc bơm thoát (giảm dần).
   - Tự động kích hoạt AUTO đóng cắt bơm theo ngưỡng đã cấu hình.
   - Nhận các lệnh từ Web Dashboard và gửi phản hồi ACK ngay lập tức.
@@ -151,7 +151,7 @@ d:\btl iot\
      MQTT_PORT=1883
      MQTT_USER=esp32
      MQTT_PASS=esp32pass
-     MQTT_TOPIC_PREFIX=iot-ao-demo-123
+     MQTT_TOPIC_PREFIX=iot
 
      # Flask Web Server
      FLASK_HOST=0.0.0.0
@@ -292,7 +292,7 @@ Giao diện được thiết kế chuẩn xác 100% theo các hình ảnh mô t�
 - **Simulator không kết nối được:** kiểm tra cửa sổ Mosquitto, tài khoản
   `esp32` trong `passwd.txt`, và các biến `MQTT_*` trong `backend\.env`.
 - **Dashboard mở nhưng không có dữ liệu mới:** backend và simulator phải cùng
-  dùng một `MQTT_TOPIC_PREFIX`; mặc định là `iot-ao-demo-123`.
+  dùng một `MQTT_TOPIC_PREFIX`; mặc định là `iot`.
 - **ESP32 thật không kết nối được:** kiểm tra ESP32 dùng Wi-Fi 2.4 GHz, cùng
   mạng LAN với máy tính, IP broker trong firmware là IP LAN của máy tính, và
   chân `Echo` HC-SR04 đã qua cầu phân áp 3.3 V.
