@@ -66,7 +66,7 @@ SELECT
     -55 - (n MOD 6) AS rssi,
     3600 + n * 1800 AS uptime_sec,
     'esp32-page2-test' AS esp32_id,
-    'iot-ao-demo-123/data' AS topic
+    'iot/data' AS topic
 FROM points;
 
 -- Kiểm tra nhanh số lượng dữ liệu theo ngày:
