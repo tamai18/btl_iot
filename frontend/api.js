@@ -5,11 +5,22 @@ const API_BASE = window.location.hostname === 'localhost' || window.location.hos
   ? 'http://localhost:5000'
   : '';   // same origin khi deploy
 
+const isDemoMode = () => {
+  return new URLSearchParams(window.location.search).get('demo') === '1' || window.__DEMO_MODE__ === true;
+};
+
 const api = {
   async get(path) {
     const res = await fetch(`${API_BASE}${path}`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return res.json();
+    const data = await res.json().catch(() => null);
+    if (!res.ok) {
+      const msg = (data && data.error) ? data.error : `HTTP ${res.status}`;
+      const err = new Error(msg);
+      err.status = res.status;
+      err.data = data;
+      throw err;
+    }
+    return data;
   },
   async post(path, body = {}) {
     const res = await fetch(`${API_BASE}${path}`, {
@@ -17,8 +28,15 @@ const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return res.json();
+    const data = await res.json().catch(() => null);
+    if (!res.ok) {
+      const msg = (data && data.error) ? data.error : `HTTP ${res.status}`;
+      const err = new Error(msg);
+      err.status = res.status;
+      err.data = data;
+      throw err;
+    }
+    return data;
   },
 
   // ── Endpoints ──────────────────────────────────────────────────────────
@@ -52,8 +70,8 @@ const demo = {
         out_on_pct:'90', out_off_pct:'80', limit_high:'95', limit_low:'5',
         max_run_min:'20', publish_sec:'2', web_version:'1.0.0',
         mqtt_broker:'192.168.1.100', mqtt_port:'1883',
-        topic_prefix:'iot-ao-demo-123', language:'vi',
-        alert_buzzer:'1', alert_led:'1',
+        topic_prefix:'iot', language:'vi',
+
       },
       total_records: 1245,
     };
@@ -92,12 +110,12 @@ const demo = {
       stats_24h: { DANGER:1, WARNING:3, INFO:12 },
       total: 45, page:1, limit:20,
       data: [
-        { id:1, created_at:'2025-10-22 21:40:12', alert_code:'HIGH_LEVEL', message:'Mực nước đạt 92% (nguy cơ tràn ao)', severity:'DANGER', water_level:92, value_str:'92 %', status:'UNRESOLVED' },
-        { id:2, created_at:'2025-10-22 21:35:08', alert_code:'PUMP_IN_OFF', message:'Máy bơm cấp đã tắt', severity:'WARNING', water_level:null, value_str:null, status:'RESOLVED' },
-        { id:3, created_at:'2025-10-22 21:20:15', alert_code:'MODE', message:'Chế độ MANUAL được kích hoạt', severity:'INFO', water_level:null, value_str:null, status:'RESOLVED' },
-        { id:4, created_at:'2025-10-22 20:40:12', alert_code:'HIGH_TREND', message:'Mực nước tăng nhanh', severity:'WARNING', water_level:65, value_str:'+5.2 %/h', status:'RESOLVED' },
-        { id:5, created_at:'2025-10-22 18:30:25', alert_code:'SENSOR', message:'Cảm biến đo không ổn định', severity:'WARNING', water_level:40, value_str:null, status:'RESOLVED' },
-        { id:6, created_at:'2025-10-22 16:10:08', alert_code:'PUMP_IN', message:'Máy bơm cấp đã bật', severity:'INFO', water_level:28.5, value_str:null, status:'RESOLVED' },
+        { id:1, created_at:'2025-10-22 21:40:12', alert_code:'high_level', message:'Mực nước đạt 92% (nguy cơ tràn ao)', severity:'DANGER', water_level:92, value_str:'92 %', status:'UNRESOLVED' },
+        { id:2, created_at:'2025-10-22 21:35:08', alert_code:'pump_in_off', message:'Máy bơm cấp đã tắt', severity:'WARNING', water_level:null, value_str:null, status:'RESOLVED' },
+        { id:3, created_at:'2025-10-22 21:20:15', alert_code:'mode', message:'Chế độ MANUAL được kích hoạt', severity:'INFO', water_level:null, value_str:null, status:'RESOLVED' },
+        { id:4, created_at:'2025-10-22 20:40:12', alert_code:'high_trend', message:'Mực nước tăng nhanh', severity:'WARNING', water_level:65, value_str:'+5.2 %/h', status:'RESOLVED' },
+        { id:5, created_at:'2025-10-22 18:30:25', alert_code:'sensor_error', message:'Cảm biến đo không ổn định', severity:'WARNING', water_level:40, value_str:null, status:'RESOLVED' },
+        { id:6, created_at:'2025-10-22 16:10:08', alert_code:'pump_in', message:'Máy bơm cấp đã bật', severity:'INFO', water_level:28.5, value_str:null, status:'RESOLVED' },
       ],
     };
   },
@@ -132,8 +150,8 @@ const demo = {
       d_empty:'100', d_full:'10', in_on_pct:'30', in_off_pct:'50',
       out_on_pct:'90', out_off_pct:'80', limit_high:'95', limit_low:'5',
       max_run_min:'20', publish_sec:'2', mqtt_broker:'192.168.1.100',
-      mqtt_port:'1883', topic_prefix:'iot-ao-demo-123',
-      alert_buzzer:'1', alert_led:'1', web_version:'1.0.0', language:'vi',
+      mqtt_port:'1883', topic_prefix:'iot',
+      web_version:'1.0.0', language:'vi',
     }};
   },
   controlLogs() {
@@ -150,14 +168,21 @@ const demo = {
   },
 };
 
-// ── Try real API, fallback to demo ──────────────────────────────────────────
+// ── Try real API, fallback to demo only when ?demo=1 or explicitly set ──────
 async function safeCall(apiFn, demoFn, ...args) {
-  try {
-    return await apiFn(...args);
-  } catch {
+  if (isDemoMode()) {
     return demoFn(...args);
   }
+  try {
+    return await apiFn(...args);
+  } catch (err) {
+    console.warn('[API Error]', err);
+    throw err;
+  }
 }
+
+window.isDemoMode = isDemoMode;
+window.api = api;
 
 window.safeAPI = {
   status:      ()      => safeCall(api.status,      demo.status),
@@ -167,6 +192,12 @@ window.safeAPI = {
   logs:        (p)     => safeCall(api.logs,        demo.logs,   p),
   controlLogs: (p)     => safeCall(api.controlLogs, demo.controlLogs, p),
   config:      ()      => safeCall(api.config,      demo.config),
-  control:     (c,p)   => safeCall(()=>api.control(c,p), ()=>({ok:true,command:c,payload:p})),
-  saveConfig:  (d)     => safeCall(()=>api.saveConfig(d), ()=>({ok:true})),
+  control:     async (c, p) => {
+    if (isDemoMode()) return { ok: true, command: c, payload: p, demo: true };
+    return await api.control(c, p);
+  },
+  saveConfig:  async (d) => {
+    if (isDemoMode()) return { ok: true, updated: Object.keys(d), demo: true };
+    return await api.saveConfig(d);
+  },
 };
