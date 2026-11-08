@@ -26,7 +26,23 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__, static_folder="../frontend", static_url_path="")
 CORS(app)
 
+from chat import chat_bp
+app.register_blueprint(chat_bp)
+
 FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend")
+
+# ── Hàm khởi động MQTT ────────────────────────────────────────────────────────
+def start_mqtt():
+    try:
+        mqtt_client.start()
+    except Exception as _e:
+        logger.warning(f"[App] mqtt_client.start error: {_e}")
+
+# ── Global JSON Error Handler ─────────────────────────────────────────────────
+@app.errorhandler(Exception)
+def handle_global_exception(e):
+    logger.error(f"[Server Error] {e}", exc_info=True)
+    return jsonify({"ok": False, "error": str(e)}), 500
 
 # ============================================================================
 #  SERVE FRONTEND
@@ -46,11 +62,24 @@ def static_files(filename):
 @app.route("/api/status")
 def api_status():
     latest = mqtt_client.get_latest()
+    device_online = (
+        latest.get("esp32_status") == "online"
+        and latest.get("ts") is not None
+    )
     row = db.execute(
         "SELECT * FROM sensor_data ORDER BY recorded_at DESC LIMIT 1", fetch="one"
     )
     cfg_rows = db.execute("SELECT config_key, config_value FROM system_config", fetch="all")
     cfg = {r["config_key"]: r["config_value"] for r in (cfg_rows or [])}
+    runtime_config = {
+        "mqtt_broker": os.getenv("MQTT_DEVICE_HOST", "192.168.1.100"),
+        "mqtt_port": os.getenv("MQTT_PORT", "1883"),
+        "topic_prefix": os.getenv("MQTT_TOPIC_PREFIX", "iot"),
+    }
+
+    # Bổ sung cấu hình thực tế nhận từ ESP32 nếu có
+    if "reported_cfg" in latest:
+        cfg["esp32_reported"] = latest["reported_cfg"]
 
     count = db.execute(
         "SELECT COUNT(*) AS cnt FROM sensor_data", fetch="one"
@@ -61,10 +90,12 @@ def api_status():
         "latest": latest,
         "last_record": _serialize(row),
         "config": cfg,
+        "runtime_config": runtime_config,
         "total_records": count["cnt"] if count else 0,
         "server_time": datetime.now().isoformat(timespec="seconds"),
         "mqtt_connected": mqtt_client.is_connected(),
         "esp32_status": latest.get("esp32_status", "unknown"),
+        "device_online": device_online,
         "db_info": db.get_db_info(),
     })
 
@@ -74,13 +105,22 @@ def api_status():
 # ============================================================================
 @app.route("/api/sensor")
 def api_sensor():
-    minutes   = int(request.args.get("minutes", 30))
+    try:
+        minutes = int(request.args.get("minutes", 30))
+    except (TypeError, ValueError):
+        minutes = 30
     date_from = request.args.get("from")   # YYYY-MM-DD
     date_to   = request.args.get("to")
     all_data  = request.args.get("all", "0") == "1"
-    limit     = min(int(request.args.get("limit", 500)), 2000)
-    page      = max(int(request.args.get("page", 1)), 1)
-    offset    = (page - 1) * limit
+    try:
+        limit = min(int(request.args.get("limit", 500)), 2000)
+    except (TypeError, ValueError):
+        limit = 500
+    try:
+        page = max(int(request.args.get("page", 1)), 1)
+    except (TypeError, ValueError):
+        page = 1
+    offset = (page - 1) * limit
 
     if all_data:
         rows = db.execute(
@@ -113,20 +153,26 @@ def api_sensor():
     else:
         now = datetime.now()
         since = now - timedelta(minutes=minutes)
-        latest = request.args.get("latest", "0") == "1"
-        order = "DESC" if latest else "ASC"
-        sql   = f"""SELECT * FROM sensor_data
-                   WHERE recorded_at >= %s AND recorded_at <= %s
-                   ORDER BY recorded_at {order} LIMIT %s"""
-        rows  = db.execute(sql, (since, now, limit), fetch="all")
-        if latest and rows:
-            rows.reverse()
+        # Luôn lấy các bản ghi mới nhất trong khung thời gian, rồi đảo ngược lại để vẽ theo thời gian tăng dần
+        sql   = """SELECT * FROM sensor_data
+                 WHERE recorded_at >= %s AND recorded_at <= %s
+                 ORDER BY recorded_at DESC LIMIT %s"""
+        rows  = db.execute(sql, (since, now, limit), fetch="all") or []
+        rows.reverse()
         cnt   = db.execute(
             """SELECT COUNT(*) AS c FROM sensor_data
                WHERE recorded_at >= %s AND recorded_at <= %s""",
             (since, now),
             fetch="one",
         )
+
+    return jsonify({
+        "ok": True,
+        "data": [_serialize(r) for r in (rows or [])],
+        "total": cnt["c"] if cnt else 0,
+        "page": page,
+        "limit": limit,
+    })
 
     return jsonify({
         "ok": True,
@@ -214,6 +260,12 @@ def resolve_alert(alert_id):
 # ============================================================================
 @app.route("/api/control", methods=["POST"])
 def api_control():
+    if not mqtt_client.is_connected():
+        return jsonify({"ok": False, "error": "MQTT Broker chưa kết nối hoặc mất liên lạc với ESP32"}), 503
+    latest = mqtt_client.get_latest()
+    if latest.get("esp32_status") != "online" or latest.get("ts") is None:
+        return jsonify({"ok": False, "error": "ESP32 chưa kết nối hoặc chưa gửi dữ liệu trạng thái"}), 503
+
     data    = request.get_json(silent=True) or {}
     command = data.get("command", "").strip()
     payload = str(data.get("payload", "")).strip()
@@ -223,18 +275,66 @@ def api_control():
                "calib_empty", "calib_full", "reset", "get", "restart"}
     if command not in ALLOWED:
         return jsonify({"ok": False, "error": f"Lệnh không hợp lệ: {command}"}), 400
-    if not payload:
-        return jsonify({"ok": False, "error": "Thiếu payload"}), 400
 
+    if command not in {"calib_empty", "calib_full", "reset", "get", "restart"} and not payload:
+        return jsonify({"ok": False, "error": "Thiếu nội dung lệnh (payload)"}), 400
+
+    # Kiểm tra & chuẩn hóa payload theo từng loại lệnh
+    if command == "mode":
+        payload = payload.upper()
+        if payload not in {"AUTO", "MANUAL"}:
+            return jsonify({"ok": False, "error": "Chế độ chỉ được là AUTO hoặc MANUAL"}), 400
+
+    elif command in {"pump_in", "pump_out"}:
+        payload = payload.upper()
+        if payload in {"1", "BẬT"}:
+            payload = "ON"
+        elif payload in {"0", "TẮT"}:
+            payload = "OFF"
+        if payload not in {"ON", "OFF"}:
+            return jsonify({"ok": False, "error": "Trạng thái bơm chỉ được là ON hoặc OFF"}), 400
+
+    elif command == "threshold":
+        parts = [p.strip() for p in payload.split(",")]
+        if len(parts) != 4:
+            return jsonify({"ok": False, "error": "Ngưỡng cần đúng 4 giá trị: inOn,inOff,outOn,outOff"}), 400
+        try:
+            a, b, c, d = [float(x) for x in parts]
+            if not (0 <= a < b and b < d and d < c <= 100):
+                return jsonify({"ok": False, "error": "Cần thỏa mãn: 0 <= inOn < inOff < outOff < outOn <= 100"}), 400
+        except ValueError:
+            return jsonify({"ok": False, "error": "Giá trị ngưỡng phải là số thực hợp lệ"}), 400
+
+    elif command == "calib":
+        parts = [p.strip() for p in payload.split(",")]
+        if len(parts) != 2:
+            return jsonify({"ok": False, "error": "Cần đúng 2 giá trị dEmpty,dFull"}), 400
+        try:
+            e, f = [float(x) for x in parts]
+            if e - f < 5 or f < 2 or e > 400:
+                return jsonify({"ok": False, "error": "dEmpty phải lớn hơn dFull ít nhất 5cm (2..400cm)"}), 400
+        except ValueError:
+            return jsonify({"ok": False, "error": "Giá trị khoảng cách phải là số thực hợp lệ"}), 400
+
+    elif command == "reset":
+        payload = "RESET"
+
+    elif command == "restart":
+        payload = "RESTART"
+
+    elif command == "get":
+        payload = "GET"
+
+    # Mã cảnh báo dạng chữ thường (thống nhất với nhóm)
     alert_code = None
     if command in {"pump_in", "pump_out"}:
         pump_name = "bơm cấp (IN)" if command == "pump_in" else "bơm thoát (OUT)"
-        suffix = "ON" if payload.upper() in {"ON", "1", "BẬT"} else "OFF"
-        alert_code = f"{command.upper()}_{suffix}"
-        if command == "pump_in" and suffix == "ON":
-            alert_code = "PUMP_IN"
-        if command == "pump_out" and suffix == "ON":
-            alert_code = "PUMP_OUT"
+        suffix = "on" if payload == "ON" else "off"
+        alert_code = f"{command}_{suffix}"
+        if command == "pump_in" and suffix == "on":
+            alert_code = "pump_in"
+        if command == "pump_out" and suffix == "on":
+            alert_code = "pump_out"
 
     log_id = mqtt_client.publish_command(command, payload, client_ip)
     active_alert = None
@@ -242,9 +342,9 @@ def api_control():
         active_alert = db.execute(
             """SELECT id, alert_code, created_at, message
                FROM alerts
-               WHERE alert_code=%s AND status='UNRESOLVED'
+               WHERE (LOWER(alert_code)=%s) AND status='UNRESOLVED'
                ORDER BY created_at DESC LIMIT 1""",
-            (alert_code,),
+            (alert_code.lower(),),
             fetch="one",
         )
 
@@ -276,11 +376,41 @@ def api_config():
     if request.method == "GET":
         rows = db.execute("SELECT * FROM system_config ORDER BY config_key", fetch="all")
         cfg  = {r["config_key"]: r["config_value"] for r in (rows or [])}
-        return jsonify({"ok": True, "config": cfg})
+        cfg["mqtt_broker"] = os.getenv("MQTT_DEVICE_HOST", "192.168.1.100")
+        cfg["mqtt_port"] = os.getenv("MQTT_PORT", "1883")
+        cfg["topic_prefix"] = os.getenv("MQTT_TOPIC_PREFIX", "iot")
+        latest = mqtt_client.get_latest()
+        resp = {"ok": True, "config": cfg}
+        if "reported_cfg" in latest:
+            resp["esp32_reported"] = latest["reported_cfg"]
+        return jsonify(resp)
 
     # POST: cập nhật và gửi xuống ESP32
     data = request.get_json(silent=True) or {}
     updated = []
+
+    # Kiểm tra tính hợp lệ trước khi lưu
+    if "in_on_pct" in data and "in_off_pct" in data:
+        try:
+            if float(data["in_on_pct"]) >= float(data["in_off_pct"]):
+                return jsonify({"ok": False, "error": "inOn phải nhỏ hơn inOff"}), 400
+        except ValueError:
+            pass
+
+    if "out_off_pct" in data and "out_on_pct" in data:
+        try:
+            if float(data["out_off_pct"]) >= float(data["out_on_pct"]):
+                return jsonify({"ok": False, "error": "outOff phải nhỏ hơn outOn"}), 400
+        except ValueError:
+            pass
+
+    if "d_empty" in data and "d_full" in data:
+        try:
+            if float(data["d_empty"]) - float(data["d_full"]) < 5:
+                return jsonify({"ok": False, "error": "dEmpty phải lớn hơn dFull ít nhất 5cm"}), 400
+        except ValueError:
+            pass
+
     for key, val in data.items():
         db.execute(
             "INSERT INTO system_config (config_key,config_value) VALUES (%s,%s) "
@@ -288,6 +418,12 @@ def api_config():
             (key, str(val), str(val)),
         )
         updated.append(key)
+
+    mqtt_ok = mqtt_client.is_connected()
+    warning_msg = None
+
+    if not mqtt_ok:
+        warning_msg = "Đã lưu cấu hình vào máy chủ nhưng chưa thể gửi tới ESP32 do mất kết nối MQTT Broker."
 
     # Nếu thay đổi ngưỡng bơm -> gửi xuống ESP32
     threshold_keys = {"in_on_pct", "in_off_pct", "out_on_pct", "out_off_pct"}
@@ -305,7 +441,10 @@ def api_config():
         calib = f"{cfg.get('d_empty',100)},{cfg.get('d_full',10)}"
         mqtt_client.publish_command("calib", calib, request.remote_addr or "web")
 
-    return jsonify({"ok": True, "updated": updated})
+    res_data = {"ok": True, "updated": updated, "mqtt_sent": mqtt_ok}
+    if warning_msg:
+        res_data["warning"] = warning_msg
+    return jsonify(res_data)
 
 
 # ============================================================================
@@ -354,14 +493,50 @@ def api_logs():
 # ============================================================================
 @app.route("/api/control_logs")
 def api_control_logs():
-    limit  = min(int(request.args.get("limit", 20)), 200)
-    page   = max(int(request.args.get("page", 1)), 1)
+    try:
+        limit = min(int(request.args.get("limit", 20)), 200)
+    except (TypeError, ValueError):
+        limit = 20
+    try:
+        page = max(int(request.args.get("page", 1)), 1)
+    except (TypeError, ValueError):
+        page = 1
     offset = (page - 1) * limit
-    rows   = db.execute(
-        "SELECT * FROM control_logs ORDER BY sent_at DESC LIMIT %s OFFSET %s",
-        (limit, offset), fetch="all"
+    date_from = request.args.get("from", "").strip()
+    date_to = request.args.get("to", "").strip()
+    device = request.args.get("device", "").strip()
+
+    where, params = [], []
+    if date_from:
+        where.append("sent_at >= %s")
+        params.append(f"{date_from} 00:00:00")
+    if date_to:
+        try:
+            date_to_exclusive = (
+                datetime.strptime(date_to, "%Y-%m-%d") + timedelta(days=1)
+            ).strftime("%Y-%m-%d")
+        except ValueError:
+            return jsonify({"ok": False, "error": "Ngày kết thúc không hợp lệ"}), 400
+        where.append("sent_at < %s")
+        params.append(f"{date_to_exclusive} 00:00:00")
+    device_commands = {
+        "Bơm cấp (IN)": "pump_in",
+        "Bơm thoát (OUT)": "pump_out",
+        "Chế độ": "mode",
+    }
+    if device in device_commands:
+        where.append("command = %s")
+        params.append(device_commands[device])
+
+    where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+    rows = db.execute(
+        f"SELECT * FROM control_logs {where_sql} ORDER BY sent_at DESC LIMIT %s OFFSET %s",
+        params + [limit, offset], fetch="all"
     )
-    cnt = db.execute("SELECT COUNT(*) AS c FROM control_logs", fetch="one")
+    cnt = db.execute(
+        f"SELECT COUNT(*) AS c FROM control_logs {where_sql}",
+        params, fetch="one"
+    )
 
     serialized = []
     for r in (rows or []):
@@ -389,23 +564,28 @@ def api_control_logs():
 
 
 # ============================================================================
-#  API: /api/chart  – Dữ liệu biểu đồ (tổng hợp theo giờ)
+#  API: /api/chart  – Dữ liệu biểu đồ (tổng hợp theo giờ / ngày)
 # ============================================================================
 @app.route("/api/chart")
 def api_chart():
     period = request.args.get("period", "day")  # hour | day | week | month
-    interval_map = {"hour": "30 MINUTE", "day": "24 HOUR", "week": "7 DAY", "month": "30 DAY"}
-    interval = interval_map.get(period, "24 HOUR")
+    interval_map = {
+        "hour": ("30 MINUTE", "%Y-%m-%d %H:%i"),
+        "day": ("24 HOUR", "%Y-%m-%d %H:00"),
+        "week": ("7 DAY", "%Y-%m-%d %H:00"),
+        "month": ("30 DAY", "%Y-%m-%d"),
+    }
+    interval, fmt = interval_map.get(period, ("24 HOUR", "%Y-%m-%d %H:00"))
 
     rows = db.execute(
         f"""SELECT
-              DATE_FORMAT(recorded_at, '%Y-%m-%d %H:%i') AS ts,
+              DATE_FORMAT(recorded_at, '{fmt}') AS ts,
               AVG(water_level) AS avg_level,
               MAX(water_level) AS max_level,
               MIN(water_level) AS min_level
             FROM sensor_data
             WHERE recorded_at >= NOW() - INTERVAL {interval}
-            GROUP BY DATE_FORMAT(recorded_at, '%Y-%m-%d %H:%i')
+            GROUP BY DATE_FORMAT(recorded_at, '{fmt}')
             ORDER BY ts ASC
             LIMIT 500""",
         fetch="all",
@@ -439,10 +619,10 @@ def _serialize(row):
 # ── Khởi động ─────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    mqtt_client.start()
+    start_mqtt()
     app.run(
         host=os.getenv("FLASK_HOST", "0.0.0.0"),
         port=int(os.getenv("FLASK_PORT", 5000)),
-        debug=os.getenv("FLASK_DEBUG", "true").lower() == "true",
+        debug=os.getenv("FLASK_DEBUG", "false").lower() == "true",
         use_reloader=False,   # tắt reloader để MQTT không bị start 2 lần
     )
