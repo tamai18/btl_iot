@@ -12,6 +12,7 @@ let configCache = {};
 // ── Navigation ────────────────────────────────────────────────────────────────
 function navigate(page) {
   hidePumpTimelineTooltip();
+  document.querySelector('.sidebar')?.classList.remove('mobile-open');
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
 
@@ -23,6 +24,11 @@ function navigate(page) {
   currentPage = page;
   onPageLoad(page);
 }
+
+window.toggleSidebar = function() {
+  const sidebar = document.querySelector('.sidebar');
+  if (sidebar) sidebar.classList.toggle('mobile-open');
+};
 
 function hidePumpTimelineTooltip() {
   const tooltip = document.getElementById('pump-timeline-tooltip');
@@ -39,6 +45,7 @@ function onPageLoad(page) {
     case 'cau-hinh':   loadConfig(); break;
     case 'canh-bao':   loadAlerts(); break;
     case 'lich-su':    loadHistory(); break;
+    case 'tro-ly-ai':  if (window.loadChatPage) window.loadChatPage(); break;
   }
 }
 
@@ -476,24 +483,6 @@ async function loadChart(period = '30m') {
     }
     const labels = chartRecords.map(r => formatChartAxisLabel(r.recorded_at, period));
     const markerIndexes = getChartMarkerIndexes(chartRecords, period);
-    if (chartRecords.length && markerIndexes.size) {
-      const lastData = [...chartRecords]
-        .reverse()
-        .find(record => record.water_level != null);
-      const lastDataDate = lastData?.recorded_at?.slice(0, 10);
-      const lastDateMarkers = [...markerIndexes]
-        .filter(index => chartRecords[index]?.recorded_at?.slice(0, 10) === lastDataDate)
-        .sort((a, b) => a - b);
-      const lastDateMarker = lastDateMarkers[lastDateMarkers.length - 1];
-      if (lastDateMarker != null) {
-        chartRecords.slice(lastDateMarker + 1).forEach(record => {
-          record.water_level = null;
-          record.distance_cm = null;
-          record.pump_in = null;
-          record.pump_out = null;
-        });
-      }
-    }
     const showTick = index => markerIndexes.has(index);
     const xTickConfig = {
       autoSkip: false,
@@ -1045,18 +1034,7 @@ function formatChartTimestamp(timestamp) {
 }
 
 function formatChartTooltipTimestamp(timestamp, isMarker, displayNow) {
-  if (!isMarker) return formatChartTimestamp(timestamp);
-
-  const date = new Date(timestamp);
-  if (Number.isNaN(date.getTime())) return '';
-
-  date.setHours(
-    displayNow.getHours(),
-    displayNow.getMinutes(),
-    displayNow.getSeconds(),
-    0
-  );
-  return formatChartTimestamp(date);
+  return formatChartTimestamp(timestamp);
 }
 
 function updateChartStats(records) {
@@ -1154,7 +1132,7 @@ function updateChartPeriodInfo(period, range = null) {
     ? ` · ${formatChartRangeTimestamp(range.start)} → ${formatChartRangeTimestamp(range.end)}`
     : '';
   const intervalText = period === '7d' || period === '30d'
-    ? ` · Mỗi điểm trên biểu đồ là giá trị trung bình trong ${selected.interval}.`
+    ? `<br>Mỗi điểm trên biểu đồ là giá trị trung bình trong ${selected.interval}.`
     : '';
   info.innerHTML = `<span class="chart-period-info-icon">◷</span>
     <span>Đang xem: <strong>${selected.range}</strong>${rangeText}${intervalText}</span>`;
@@ -1181,17 +1159,23 @@ async function loadControlPage() {
     // 1. Cập nhật 4 thẻ trạng thái trên cùng
     setText('ctrl-ov-level', fmt.pct(rec.water_level != null ? rec.water_level : 45.5));
     setText('ctrl-ov-dist', `Khoảng cách: ${rec.distance_cm != null ? rec.distance_cm.toFixed(1) : '56.7'} cm`);
-    setText('ctrl-ov-esp32', rec.sensor_err ? 'Error' : 'Online');
+    const deviceOnline = status.device_online === true;
+    setText('ctrl-ov-esp32', deviceOnline ? (rec.sensor_err ? 'Error' : 'Online') : 'Offline');
     setText('ctrl-ov-rssi', `RSSI: ${rec.rssi != null ? rec.rssi : -55} dBm`);
     setText('ctrl-ov-mqtt', status.mqtt_connected ? 'Đã kết nối' : 'Đã kết nối');
-    setText('ctrl-ov-mode', rec.auto_mode ? 'AUTO' : 'MANUAL');
+    setText('ctrl-ov-mode', deviceOnline && rec.auto_mode != null
+      ? (rec.auto_mode ? 'AUTO' : 'MANUAL')
+      : '--');
 
     // 2. Cập nhật 2 thẻ chế độ AUTO / MANUAL
-    const isAuto = rec.auto_mode !== 0;
+    const isAuto = deviceOnline && rec.auto_mode !== 0;
     const cardAuto = document.getElementById('mode-card-auto');
     const cardMan  = document.getElementById('mode-card-manual');
     if (cardAuto && cardMan) {
-      if (isAuto) {
+      if (!deviceOnline) {
+        cardAuto.className = 'mode-select-card';
+        cardMan.className  = 'mode-select-card';
+      } else if (isAuto) {
         cardAuto.className = 'mode-select-card active';
         cardMan.className  = 'mode-select-card';
       } else {
@@ -1209,17 +1193,58 @@ async function loadControlPage() {
     setText('ctrl-p-out-txt', pOutOn ? 'Bật' : 'Tắt');
     setText('ctrl-p-out-dot', pOutOn ? '🟢' : '🔴');
 
-    // 4. Tải lịch sử lệnh điều khiển
+    // 4. Hiển thị phản hồi mới nhất từ cùng nguồn dữ liệu với lịch sử
+    const latestLogs = await safeAPI.controlLogs({ page: 1, limit: 1 });
+    updateLatestFeedback(latestLogs.data?.[0]);
     await loadControlLogsTable();
 
   } catch (e) {
     console.error('loadControlPage error:', e);
   }
+
+  function updateLatestFeedback(log) {
+    const icon = document.getElementById('feedback-icon');
+    if (!log) {
+      setText('feedback-time', '--');
+      setText('feedback-cmd', 'Chưa có lệnh điều khiển');
+      setText('feedback-result', 'Chưa có phản hồi');
+      const emptyResult = document.getElementById('feedback-result');
+      if (emptyResult) emptyResult.className = 'feedback-result text-muted';
+      return;
+    }
+
+    const device = log.device
+      || (log.command === 'pump_in' ? 'Bơm cấp (IN)'
+        : log.command === 'pump_out' ? 'Bơm thoát (OUT)' : 'Chế độ');
+    const payload = log.payload || '--';
+    const result = log.ack_payload || (
+      log.status === 'ACK_OK' ? 'Thành công'
+        : log.status === 'ACK_ERR' ? 'Bị từ chối'
+          : log.status === 'TIMEOUT' ? 'Hết hạn' : 'Đang chờ phản hồi...'
+    );
+    const statusClass = log.status === 'ACK_OK' ? 'text-success'
+      : log.status === 'ACK_ERR' || log.status === 'TIMEOUT' ? 'text-danger'
+        : 'text-muted';
+
+    setText('feedback-time', fmt.dt(log.sent_at).slice(11, 19) || '--');
+    setText('feedback-cmd', `Nhận lệnh: ${log.command === 'pump_in' || log.command === 'pump_out'
+      ? `${payload === 'ON' || payload === 'Bật' ? 'Bật' : 'Tắt'} ${device}`
+      : `${device} ${payload}`}`);
+    setText('feedback-result', `Kết quả: ${result}`);
+    const resultEl = document.getElementById('feedback-result');
+    if (resultEl) resultEl.className = `feedback-result ${statusClass}`;
+    if (icon) icon.textContent = log.status === 'ACK_OK' ? '✓' : '!';
+  }
 }
 
 async function setMode(mode) {
   try {
+    toast(`Đang gửi lệnh chuyển sang chế độ ${mode}...`, 'info', 1500);
     const res = await safeAPI.control('mode', mode);
+    if (!res || !res.ok) {
+      toast(`❌ Lỗi gửi lệnh chế độ: ${res?.error || 'Thao tác không thành công'}`, 'error');
+      return;
+    }
     pendingMode = mode;
     pendingModeAt = Date.now();
     const isAuto = mode === 'AUTO';
@@ -1230,27 +1255,32 @@ async function setMode(mode) {
       cardManual.className = `mode-select-card${isAuto ? '' : ' active manual-active'}`;
     }
     setText('ctrl-ov-mode', mode);
-    updateFeedback('mode', mode);
+    updateFeedback('mode', mode, 'Đã gửi lệnh (chờ ESP32 xác nhận)');
     toast(`Đã gửi lệnh chuyển sang chế độ ${mode}`, 'success');
-    setTimeout(loadControlPage, 2200);
+    setTimeout(loadControlPage, 1500);
   } catch (e) {
-    toast('Lỗi khi gửi lệnh chế độ', 'error');
+    toast(`❌ Lỗi gửi lệnh chế độ: ${e.message || 'Mất kết nối'}`, 'error');
   }
 }
 
 async function sendPumpCmd(pump, state) {
   try {
-    const res = await safeAPI.control(pump, state);
-    updateFeedback(pump, state);
     const pumpName = pump === 'pump_in' ? 'bơm cấp (IN)' : 'bơm thoát (OUT)';
+    toast(`Đang gửi lệnh ${state === 'ON' ? 'Bật' : 'Tắt'} ${pumpName}...`, 'info', 1500);
+    const res = await safeAPI.control(pump, state);
+    if (!res || !res.ok) {
+      toast(`❌ Lỗi gửi lệnh bơm: ${res?.error || 'Thao tác không thành công'}`, 'error');
+      return;
+    }
+    updateFeedback(pump, state, 'Đã gửi lệnh (chờ ESP32 xác nhận)');
     if (res.warning) {
       toast(`⚠️ ${res.warning}`, 'warning', 6000);
     } else {
       toast(`Đã gửi lệnh: ${state === 'ON' ? 'Bật' : 'Tắt'} ${pumpName}`, 'success');
     }
-    setTimeout(loadControlPage, 600);
+    setTimeout(loadControlPage, 1500);
   } catch (e) {
-    toast('Lỗi khi gửi lệnh bơm', 'error');
+    toast(`❌ Lỗi khi gửi lệnh bơm: ${e.message || 'Mất kết nối'}`, 'error');
   }
 }
 
@@ -1288,24 +1318,24 @@ async function quickAction(action) {
   }
 }
 
-function updateFeedback(cmdType, val) {
+function updateFeedback(cmdType, val, resultStatus = 'Đã gửi (đang chờ ACK)') {
   const now = new Date();
   const timeStr = now.toLocaleTimeString('vi');
   setText('feedback-time', timeStr);
 
   let cmdLabel = '';
   if (cmdType === 'mode') {
-    cmdLabel = `Nhận lệnh: Chuyển sang chế độ ${val}`;
+    cmdLabel = `Lệnh: Chuyển sang chế độ ${val}`;
   } else if (cmdType === 'pump_in') {
-    cmdLabel = `Nhận lệnh: ${val === 'ON' ? 'Bật' : 'Tắt'} bơm cấp (IN)`;
+    cmdLabel = `Lệnh: ${val === 'ON' ? 'Bật' : 'Tắt'} bơm cấp (IN)`;
   } else if (cmdType === 'pump_out') {
-    cmdLabel = `Nhận lệnh: ${val === 'ON' ? 'Bật' : 'Tắt'} bơm thoát (OUT)`;
+    cmdLabel = `Lệnh: ${val === 'ON' ? 'Bật' : 'Tắt'} bơm thoát (OUT)`;
   } else {
-    cmdLabel = `Nhận lệnh: ${val}`;
+    cmdLabel = `Lệnh: ${val}`;
   }
 
   setText('feedback-cmd', cmdLabel);
-  setText('feedback-result', 'Kết quả: Thành công');
+  setText('feedback-result', `Kết quả: ${resultStatus}`);
 }
 
 async function loadControlLogsTable(page = ctrlLogPage) {
@@ -1313,13 +1343,17 @@ async function loadControlLogsTable(page = ctrlLogPage) {
   if (!tbody) return;
 
   ctrlLogPage = page;
+  const dateFrom = document.getElementById('ctrl-log-date-from')?.value || '';
+  const dateTo = document.getElementById('ctrl-log-date-to')?.value || '';
   const devFilter = document.getElementById('ctrl-log-device')?.value || '';
-  const data = await safeAPI.controlLogs({ page, limit: 10 });
+  const data = await safeAPI.controlLogs({
+    page,
+    limit: 10,
+    from: dateFrom,
+    to: dateTo,
+    device: devFilter,
+  });
   let rows = data.data || [];
-
-  if (devFilter) {
-    rows = rows.filter(r => (r.device || r.command || '').includes(devFilter));
-  }
 
   if (!rows.length) {
     tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px" class="text-muted">Chưa có bản ghi nào</td></tr>';
@@ -1329,19 +1363,34 @@ async function loadControlLogsTable(page = ctrlLogPage) {
   tbody.innerHTML = rows.map(r => {
     const isRed = r.payload === 'Bật' || r.payload === 'ON';
     const payloadHtml = isRed
-      ? `<span class="text-danger fw-600">${r.payload}</span>`
-      : `<span>${r.payload}</span>`;
+      ? `<span class="text-danger fw-600">${escapeHtml(r.payload)}</span>`
+      : `<span>${escapeHtml(r.payload)}</span>`;
 
     const devLabel = r.device || (r.command === 'pump_in' ? 'Bơm cấp (IN)' : r.command === 'pump_out' ? 'Bơm thoát (OUT)' : 'Chế độ');
     const timeFormatted = fmt.dt(r.sent_at);
 
+    let statusHtml = '';
+    if (r.status === 'ACK_OK') {
+      statusHtml = '<span class="badge badge-success">Thành công</span>';
+    } else if (r.status === 'ACK_ERR') {
+      statusHtml = '<span class="badge badge-danger">Bị từ chối</span>';
+    } else if (r.status === 'TIMEOUT') {
+      statusHtml = '<span class="badge badge-warning">Hết hạn</span>';
+    } else {
+      statusHtml = '<span class="badge badge-info">Đang chờ ACK</span>';
+    }
+
+    const ackDesc = r.ack_payload
+      ? escapeHtml(r.ack_payload)
+      : (r.status === 'SENT' ? '<span class="text-muted">Đang chờ phản hồi...</span>' : '--');
+
     return `<tr>
       <td style="font-size:12.5px;color:#334155">${timeFormatted}</td>
-      <td style="font-weight:500">${devLabel}</td>
+      <td style="font-weight:500">${escapeHtml(devLabel)}</td>
       <td>${payloadHtml}</td>
-      <td><span class="text-success fw-600">Thành công</span></td>
-      <td style="color:#475569">${r.ack_payload || 'Thực hiện thành công'}</td>
-      <td style="color:#64748b">${r.initiated_by || 'Admin'}</td>
+      <td>${statusHtml}</td>
+      <td style="color:#475569">${ackDesc}</td>
+      <td style="color:#64748b">${escapeHtml(r.initiated_by || 'Admin')}</td>
     </tr>`;
   }).join('');
 
@@ -1359,10 +1408,11 @@ async function loadControlLogsTable(page = ctrlLogPage) {
 // ══════════════════════════════════════════════════════════════════════════════
 //  PAGE 4: CẤU HÌNH
 // ══════════════════════════════════════════════════════════════════════════════
-async function loadConfig() {
+async function loadConfig(showToast = false) {
   try {
     const data = await safeAPI.config();
     const cfg = data.config || {};
+    const runtimeConfig = data.runtime_config || {};
     configCache = cfg;
 
     setVal('cfg-in-on',      cfg.in_on_pct   || 30);
@@ -1375,16 +1425,11 @@ async function loadConfig() {
     setVal('cfg-limit-low',  cfg.limit_low   || 5);
     setVal('cfg-max-run',    cfg.max_run_min || 20);
     setVal('cfg-publish-sec',cfg.publish_sec || 2);
-    setVal('cfg-mqtt-broker',cfg.mqtt_broker || '192.168.1.100');
-    setVal('cfg-mqtt-port',  cfg.mqtt_port   || 1883);
-    setVal('cfg-topic-prefix',cfg.topic_prefix || 'iot-ao-demo-123');
+    setVal('cfg-mqtt-broker',runtimeConfig.mqtt_broker || cfg.mqtt_broker || '192.168.1.100');
+    setVal('cfg-mqtt-port',  runtimeConfig.mqtt_port   || cfg.mqtt_port   || 1883);
+    setVal('cfg-topic-prefix',runtimeConfig.topic_prefix || cfg.topic_prefix || 'iot');
 
-    const ledEl = document.getElementById('cfg-alert-led');
-    const buzEl = document.getElementById('cfg-alert-buzzer');
-    if (ledEl) ledEl.checked = cfg.alert_led !== '0';
-    if (buzEl) buzEl.checked = cfg.alert_buzzer !== '0';
-
-    // Config table
+    // Config table: hiển thị cấu hình từ ESP32 nếu có phản hồi, kết hợp cấu hình đã lưu
     const tbody = document.getElementById('cfg-table-body');
     if (tbody) {
       const desc = {
@@ -1396,14 +1441,34 @@ async function loadConfig() {
         mqtt_broker:'MQTT Broker IP', mqtt_port:'MQTT Port',
         topic_prefix:'Topic Prefix', web_version:'Phiên bản',
       };
-      tbody.innerHTML = Object.entries(cfg)
-        .map(([k,v]) =>
-          `<tr><td><code>${k}</code></td><td><strong>${v}</strong></td><td style="color:var(--text-secondary);font-size:12px">${desc[k]||''}</td></tr>`
-        ).join('');
+
+      const reported = data.esp32_reported || null;
+      const hiddenConfigKeys = new Set(['alert_led', 'alert_buzzer']);
+      let rowsHtml = Object.entries(cfg)
+        .filter(([k]) => !hiddenConfigKeys.has(k))
+        .map(([k,v]) => {
+          let espVal = '';
+          if (reported) {
+            if (k === 'in_on_pct' && reported.inOn != null) espVal = ` <span class="badge badge-info" title="ESP32 phản hồi">ESP32: ${reported.inOn}%</span>`;
+            else if (k === 'in_off_pct' && reported.inOff != null) espVal = ` <span class="badge badge-info" title="ESP32 phản hồi">ESP32: ${reported.inOff}%</span>`;
+            else if (k === 'out_on_pct' && reported.outOn != null) espVal = ` <span class="badge badge-info" title="ESP32 phản hồi">ESP32: ${reported.outOn}%</span>`;
+            else if (k === 'out_off_pct' && reported.outOff != null) espVal = ` <span class="badge badge-info" title="ESP32 phản hồi">ESP32: ${reported.outOff}%</span>`;
+            else if (k === 'd_empty' && reported.dEmpty != null) espVal = ` <span class="badge badge-info" title="ESP32 phản hồi">ESP32: ${reported.dEmpty}cm</span>`;
+            else if (k === 'd_full' && reported.dFull != null) espVal = ` <span class="badge badge-info" title="ESP32 phản hồi">ESP32: ${reported.dFull}cm</span>`;
+          }
+          return `<tr><td><code>${escapeHtml(k)}</code></td><td><strong>${escapeHtml(v)}</strong>${espVal}</td><td style="color:var(--text-secondary);font-size:12px">${desc[k]||''}</td></tr>`;
+        }).join('');
+
+      tbody.innerHTML = rowsHtml;
+    }
+
+    if (showToast) {
+      toast('🔄 Đã tải lại cấu hình từ server!', 'info');
     }
 
   } catch(e) {
     console.error('loadConfig error:', e);
+    if (showToast) toast('❌ Không thể tải cấu hình từ server', 'error');
   }
 }
 
@@ -1422,20 +1487,42 @@ async function saveAndSendConfig() {
     mqtt_broker: getVal('cfg-mqtt-broker'),
     mqtt_port:   getVal('cfg-mqtt-port'),
     topic_prefix:getVal('cfg-topic-prefix'),
-    alert_led:   document.getElementById('cfg-alert-led')?.checked ? '1' : '0',
-    alert_buzzer:document.getElementById('cfg-alert-buzzer')?.checked ? '1' : '0',
   };
 
   // Validate
-  if (+data.in_on_pct >= +data.in_off_pct) { toast('inOn phải nhỏ hơn inOff', 'warning'); return; }
-  if (+data.out_off_pct >= +data.out_on_pct){ toast('outOff phải nhỏ hơn outOn', 'warning'); return; }
-  if (+data.d_full >= +data.d_empty - 5)   { toast('dFull phải nhỏ hơn dEmpty ít nhất 5cm', 'warning'); return; }
+  if (+data.in_on_pct >= +data.in_off_pct) {
+    toast('Ngưỡng bật bơm cấp (inOn) phải nhỏ hơn ngưỡng tắt (inOff)', 'warning');
+    return;
+  }
+  if (+data.in_off_pct >= +data.out_off_pct) {
+    toast('Ngưỡng tắt bơm cấp (inOff) phải nhỏ hơn ngưỡng tắt bơm thoát (outOff)', 'warning');
+    return;
+  }
+  if (+data.out_off_pct >= +data.out_on_pct) {
+    toast('Ngưỡng tắt bơm thoát (outOff) phải nhỏ hơn ngưỡng bật (outOn)', 'warning');
+    return;
+  }
+  if (+data.d_full >= +data.d_empty - 5) {
+    toast('dFull phải nhỏ hơn dEmpty ít nhất 5cm', 'warning');
+    return;
+  }
 
   try {
+    toast('Đang lưu cấu hình và gửi xuống ESP32...', 'info', 2000);
     const r = await safeAPI.saveConfig(data);
-    toast(r.ok ? '✅ Cấu hình đã lưu và gửi xuống ESP32!' : 'Lỗi lưu cấu hình', r.ok ? 'success' : 'error');
-    if (r.ok) loadConfig();
-  } catch { toast('Lỗi kết nối', 'error'); }
+    if (!r || !r.ok) {
+      toast(`❌ Lỗi lưu cấu hình: ${r?.error || 'Thao tác không thành công'}`, 'error');
+      return;
+    }
+    if (r.warning) {
+      toast(`⚠️ ${r.warning}`, 'warning', 6000);
+    } else {
+      toast('✅ Đã lưu và ESP32 xác nhận cập nhật cấu hình', 'success');
+    }
+    loadConfig();
+  } catch (err) {
+    toast(`❌ Lỗi kết nối: ${err.message || 'Mất kết nối máy chủ'}`, 'error');
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1495,7 +1582,19 @@ async function loadAlerts(page = alertPage) {
 }
 
 function viewAlert(id, msg) {
-  toast(`📋 Cảnh báo #${id}: ${msg}`, 'info', 5000);
+  setText('alert-modal-title', `Cảnh báo #${id}`);
+  setText('alert-modal-message', msg || 'Không có nội dung cảnh báo.');
+  const modal = document.getElementById('alert-modal');
+  if (!modal) return;
+  modal.hidden = false;
+  document.body.classList.add('modal-open');
+}
+
+function closeAlertModal(event) {
+  if (event && event.target !== event.currentTarget) return;
+  const modal = document.getElementById('alert-modal');
+  if (modal) modal.hidden = true;
+  document.body.classList.remove('modal-open');
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1607,7 +1706,7 @@ function exportCSV() {
   const headers = ['Thời gian','Mực nước (%)','Khoảng cách (cm)','Bơm cấp','Bơm thoát','Chế độ','Lỗi'];
   let csv = headers.join(',') + '\n';
   rows.forEach(row => {
-    const cells = [...row.querySelectorAll('td')].map(td => `"${td.innerText.trim()}"`);
+    const cells = [...row.querySelectorAll('td')].map(td => `"${td.innerText.trim().replace(/"/g, '""')}"`);
     csv += cells.join(',') + '\n';
   });
   const blob = new Blob(['\uFEFF' + csv], { type:'text/csv;charset=utf-8' });
@@ -1743,15 +1842,68 @@ function getVal(id) {
   return document.getElementById(id)?.value || '';
 }
 function escapeHtml(s) {
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  if (s == null) return '';
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
+
+window.sendCmd = async function(command, payload = '1') {
+  if (command === 'restart') {
+    if (!confirm('⚡ Bạn có chắc chắn muốn khởi động lại vi điều khiển ESP32 không?')) return;
+  } else if (command === 'reset') {
+    if (!confirm('⚠ Bạn có chắc chắn muốn xóa lỗi chốt và đặt lại trạng thái cảnh báo?')) return;
+  }
+
+  try {
+    toast(`Đang gửi lệnh ${command}...`, 'info', 2000);
+    const res = await safeAPI.control(command, payload);
+    if (res && res.ok) {
+      if (command === 'restart') {
+        toast('✅ Đã gửi lệnh khởi động lại ESP32 thành công!', 'success');
+      } else if (command === 'reset') {
+        toast('✅ Đã gửi yêu cầu xóa lỗi chốt (ESP32 đang kiểm tra an toàn)...', 'info');
+        setTimeout(async () => {
+          try {
+            const logs = await safeAPI.controlLogs({ limit: 5 });
+            const resetLog = (logs.data || []).find(l => l.command === 'reset');
+            if (resetLog) {
+              if (resetLog.status === 'ACK_OK') {
+                toast('✅ ESP32 xác nhận đủ điều kiện an toàn: Đã xóa lỗi chốt (chuyển sang MANUAL)!', 'success', 5000);
+              } else if (resetLog.status === 'ACK_ERR' && (resetLog.ack_payload || '').includes('reset_unsafe')) {
+                toast(`⛔ ESP32 từ chối xóa lỗi: Điều kiện chưa an toàn (${resetLog.ack_payload})! Vui lòng khắc phục sự cố vật lý trước.`, 'error', 7000);
+              }
+            }
+          } catch (_) {}
+          loadAlerts();
+          loadControlPage();
+        }, 1200);
+      } else if (command === 'get') {
+        toast('✅ Đã yêu cầu ESP32 gửi lại cấu hình!', 'success');
+        setTimeout(loadConfig, 1500);
+      } else {
+        toast(`✅ Lệnh ${command} đã gửi thành công!`, 'success');
+      }
+      setTimeout(loadControlPage, 800);
+    } else {
+      toast(`❌ Lỗi gửi lệnh: ${res?.error || 'Thao tác không thành công'}`, 'error');
+    }
+  } catch (err) {
+    toast(`❌ Lỗi gửi lệnh: ${err.message || 'Mất kết nối máy chủ'}`, 'error');
+  }
+};
 
 // ── Auto-refresh ──────────────────────────────────────────────────────────────
 function startAutoRefresh() {
   autoRefreshTimer = setInterval(() => {
-    if (currentPage === 'tong-quan') loadOverview();
-    if (currentPage === 'tong-quan') loadChart(currentChartPeriod);
-    if (currentPage === 'dieu-khien')loadControlPage();
+    if (currentPage === 'tong-quan') {
+      loadOverview();
+    } else if (currentPage === 'dieu-khien') {
+      loadControlPage();
+    }
   }, 5000);
 }
 
