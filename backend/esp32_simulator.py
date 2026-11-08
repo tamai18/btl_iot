@@ -28,7 +28,7 @@ MQTT_HOST = os.getenv("MQTT_HOST", "127.0.0.1")
 MQTT_PORT = int(os.getenv("MQTT_PORT", 1883))
 MQTT_USER = os.getenv("MQTT_USER", "esp32")
 MQTT_PASS = os.getenv("MQTT_PASS", "esp32pass")
-P         = os.getenv("MQTT_TOPIC_PREFIX", "iot-ao-demo-123")
+P         = os.getenv("MQTT_TOPIC_PREFIX", "iot")
 
 # Trạng thái ESP32 giả lập
 state = {
@@ -93,7 +93,7 @@ def on_message(c, userdata, msg):
         elif payload.upper() == "MANUAL":
             state["auto_mode"] = 0
             ack("ok:mode=MANUAL")
-        send_alert("MODE", f"Chế độ {payload.upper()} được kích hoạt", "INFO")
+        send_alert("mode", f"Chế độ {payload.upper()} được kích hoạt", "INFO")
 
     elif cmd == "pump_in":
         # Điều khiển bơm IN -> tự động chuyển sang MANUAL
@@ -102,11 +102,11 @@ def on_message(c, userdata, msg):
             state["pump_in"] = 1
             state["pump_out"] = 0  # Khoá chéo 2 bơm
             ack("ok:pump_in=ON")
-            send_alert("PUMP_IN", "Máy bơm cấp nước đã bật", "INFO")
+            send_alert("pump_in", "Máy bơm cấp nước đã bật", "INFO")
         else:
             state["pump_in"] = 0
             ack("ok:pump_in=OFF")
-            send_alert("PUMP_IN_OFF", "Máy bơm cấp nước đã tắt", "WARNING")
+            send_alert("pump_in_off", "Máy bơm cấp nước đã tắt", "WARNING")
 
     elif cmd == "pump_out":
         # Điều khiển bơm OUT -> tự động chuyển sang MANUAL
@@ -115,11 +115,11 @@ def on_message(c, userdata, msg):
             state["pump_out"] = 1
             state["pump_in"] = 0  # Khoá chéo 2 bơm
             ack("ok:pump_out=ON")
-            send_alert("PUMP_OUT", "Máy bơm thoát nước đã bật", "INFO")
+            send_alert("pump_out", "Máy bơm thoát nước đã bật", "INFO")
         else:
             state["pump_out"] = 0
             ack("ok:pump_out=OFF")
-            send_alert("PUMP_OUT_OFF", "Máy bơm thoát nước đã tắt", "WARNING")
+            send_alert("pump_out_off", "Máy bơm thoát nước đã tắt", "WARNING")
 
     elif cmd == "threshold":
         # inOn,inOff,outOn,outOff
@@ -154,19 +154,39 @@ def on_message(c, userdata, msg):
         send_cfg()
 
     elif cmd == "reset":
-        state["fault_code"] = "none"
-        state["sensor_err"] = 0
-        ack("ok:reset")
-        send_alert("RESET", "Đã xóa lỗi chốt hệ thống", "INFO")
+        # 1. Luon ngat ca hai bom ve OFF
+        state["pump_in"] = 0
+        state["pump_out"] = 0
+
+        # 2. Kiem tra dieu kien an toan truoc khi cho phep Reset
+        unsafe_reason = None
+        if state.get("sensor_err", 0) != 0:
+            unsafe_reason = "sensor_error"
+        elif state["level"] >= state["limit_high"]:
+            unsafe_reason = "high_limit"
+        elif state["level"] <= state["limit_low"]:
+            unsafe_reason = "low_limit"
+
+        # 4. Neu dieu kien chua an toan, tra ve ACK err:reset_unsafe
+        if unsafe_reason:
+            ack(f"err:reset_unsafe ({unsafe_reason})")
+            send_alert("reset_reject", f"Từ chối xóa lỗi vì điều kiện chưa an toàn: {unsafe_reason}", "WARNING")
+        else:
+            # 1 & 3. Thoa man an toan: xoa loi va chuyen he thong ve MANUAL de khong tu dong bat lai bom
+            state["fault_code"] = "none"
+            state["sensor_err"] = 0
+            state["auto_mode"] = 0
+            ack("ok:reset")
+            send_alert("reset", "Đã xóa lỗi chốt hệ thống, chuyển sang chế độ MANUAL", "INFO")
 
     elif cmd == "get":
         send_cfg()
-        ack("ok:cfg_sent")
+        ack("ok:get")
 
     elif cmd == "restart":
-        ack("ok:restarting")
+        ack("ok:restart")
         state["uptime"] = 0
-        send_alert("RESTART", "ESP32 đã khởi động lại", "INFO")
+        send_alert("restart", "ESP32 đã khởi động lại", "INFO")
 
 def ack(msg):
     if client:
@@ -204,18 +224,18 @@ def update_physics():
         if state["level"] <= state["in_on"] and not state["pump_in"]:
             state["pump_in"] = 1
             state["pump_out"] = 0
-            send_alert("PUMP_IN", "Mực nước thấp, tự động BẬT bơm cấp nước (AUTO)", "INFO")
+            send_alert("pump_in", "Mực nước thấp, tự động BẬT bơm cấp nước (AUTO)", "INFO")
         elif state["level"] >= state["in_off"] and state["pump_in"]:
             state["pump_in"] = 0
-            send_alert("PUMP_IN_OFF", "Mực nước đạt ngưỡng an toàn, tự động TẮT bơm cấp (AUTO)", "INFO")
+            send_alert("pump_in_off", "Mực nước đạt ngưỡng an toàn, tự động TẮT bơm cấp (AUTO)", "INFO")
 
         if state["level"] >= state["out_on"] and not state["pump_out"]:
             state["pump_out"] = 1
             state["pump_in"] = 0
-            send_alert("PUMP_OUT", "Mực nước cao, tự động BẬT bơm thoát nước (AUTO)", "WARNING")
+            send_alert("pump_out", "Mực nước cao, tự động BẬT bơm thoát nước (AUTO)", "WARNING")
         elif state["level"] <= state["out_off"] and state["pump_out"]:
             state["pump_out"] = 0
-            send_alert("PUMP_OUT_OFF", "Mực nước giảm về ngưỡng an toàn, tự động TẮT bơm thoát (AUTO)", "INFO")
+            send_alert("pump_out_off", "Mực nước giảm về ngưỡng an toàn, tự động TẮT bơm thoát (AUTO)", "INFO")
 
     # 2. Thay đổi mực nước
     if state["pump_in"]:
@@ -236,13 +256,13 @@ def update_physics():
     # 4. Cảnh báo an toàn ngưỡng giới hạn
     if state["level"] >= state["limit_high"] and state["pump_in"]:
         state["pump_in"] = 0  # Cắt khẩn cấp chống tràn
-        state["fault_code"] = "LIMIT_HIGH"
-        send_alert("HIGH_LEVEL", f"Mực nước đạt {state['level']:.1f}% (nguy cơ tràn ao)", "DANGER")
+        state["fault_code"] = "limit_high"
+        send_alert("high_level", f"Mực nước đạt {state['level']:.1f}% (nguy cơ tràn ao)", "DANGER")
 
     if state["level"] <= state["limit_low"] and state["pump_out"]:
         state["pump_out"] = 0  # Cắt khẩn cấp chống cháy cạn
-        state["fault_code"] = "LIMIT_LOW"
-        send_alert("LOW_LEVEL", f"Mực nước đạt {state['level']:.1f}% (nguy cơ cạn ao)", "DANGER")
+        state["fault_code"] = "limit_low"
+        send_alert("low_level", f"Mực nước đạt {state['level']:.1f}% (nguy cơ cạn ao)", "DANGER")
 
     state["uptime"] += 2
     state["rssi"] = -55 + random.randint(-3, 3)
