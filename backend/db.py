@@ -142,6 +142,47 @@ def _setup_sqlite_schema():
         description TEXT,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
+
+    CREATE TABLE IF NOT EXISTS notification_recipients (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        email TEXT NOT NULL UNIQUE,
+        name TEXT DEFAULT 'Người nuôi cá',
+        enabled INTEGER DEFAULT 1,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS incidents (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        event_key TEXT NOT NULL,
+        severity TEXT NOT NULL,
+        device_id TEXT DEFAULT 'esp32-ao-01',
+        status TEXT DEFAULT 'ACTIVE',
+        water_level_at_detect REAL,
+        pump_in_at_detect INTEGER DEFAULT 0,
+        pump_out_at_detect INTEGER DEFAULT 0,
+        started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        recovered_at TIMESTAMP,
+        last_notified_at TIMESTAMP,
+        remind_count INTEGER DEFAULT 0,
+        source TEXT DEFAULT 'backend_rule',
+        notes TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS notification_outbox (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        incident_id INTEGER,
+        recipient_id INTEGER,
+        recipient_email TEXT NOT NULL,
+        subject TEXT NOT NULL,
+        body_html TEXT NOT NULL,
+        status TEXT DEFAULT 'PENDING',
+        scheduled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        sent_at TIMESTAMP,
+        attempt_count INTEGER DEFAULT 0,
+        last_error TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
     """)
 
     # Seed default config
@@ -166,9 +207,14 @@ def _setup_sqlite_schema():
         ('mqtt_broker', os.getenv('MQTT_DEVICE_HOST', '192.168.1.100'), 'MQTT Broker IP dùng cho ESP32'),
         ('mqtt_port', os.getenv('MQTT_PORT', '1883'), 'MQTT Broker Port'),
         ('topic_prefix', os.getenv('MQTT_TOPIC_PREFIX', 'iot'), 'Tiền tố Topic MQTT'),
-        ('language', 'vi', 'Ngôn ngữ hiển thị')
+        ('language', 'vi', 'Ngôn ngữ hiển thị'),
+        ('mail_enabled', '1', 'Bật/tắt gửi email cảnh báo tự động'),
+        ('mail_recipient_default', 'nguoinuoi@example.com', 'Email nhận cảnh báo chính')
     ]
     cur.executemany("INSERT OR IGNORE INTO system_config (config_key, config_value, description) VALUES (?,?,?)", configs)
+
+    cur.execute("INSERT OR IGNORE INTO notification_recipients (email, name, enabled) VALUES (?, ?, ?)",
+                ('nguoinuoi@example.com', 'Chủ ao nuôi cá', 1))
 
     # Seed initial sensor data if empty
     cur.execute("SELECT COUNT(*) FROM sensor_data")

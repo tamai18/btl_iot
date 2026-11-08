@@ -49,6 +49,18 @@ const api = {
   config:      ()      => api.get('/api/config'),
   control:     (command, payload) => api.post('/api/control', { command, payload }),
   saveConfig:  (data)  => api.post('/api/config', data),
+
+  // ── Notify Endpoints ───────────────────────────────────────────────────
+  notify: {
+    getRecipients: () => api.get('/api/notify/recipients'),
+    addRecipient: (email, name) => api.post('/api/notify/recipients', { email, name }),
+    deleteRecipient: (id) => fetch(`${API_BASE}/api/notify/recipients/${id}`, { method: 'DELETE' }).then(r => r.json()),
+    getSettings: () => api.get('/api/notify/settings'),
+    saveSettings: (data) => api.post('/api/notify/settings', data),
+    sendTest: (email) => api.post('/api/notify/test', { email }),
+    getLogs: (p = {}) => api.get('/api/notify/logs?' + new URLSearchParams(p)),
+    getIncidents: (p = {}) => api.get('/api/notify/incidents?' + new URLSearchParams(p)),
+  },
 };
 
 // ── Demo / Fallback data (khi chưa có backend) ──────────────────────────────
@@ -199,5 +211,15 @@ window.safeAPI = {
   saveConfig:  async (d) => {
     if (isDemoMode()) return { ok: true, updated: Object.keys(d), demo: true };
     return await api.saveConfig(d);
+  },
+  notify: {
+    getRecipients: () => safeCall(api.notify.getRecipients, () => ({ ok: true, recipients: [{ id: 1, email: 'nguoinuoi@example.com', name: 'Chủ ao nuôi cá', enabled: 1 }] })),
+    addRecipient: (email, name) => safeCall(() => api.notify.addRecipient(email, name), () => ({ ok: true, id: 99 })),
+    deleteRecipient: (id) => safeCall(() => api.notify.deleteRecipient(id), () => ({ ok: true })),
+    getSettings: () => safeCall(api.notify.getSettings, () => ({ ok: true, settings: { mail_enabled: true, recipient_default: 'nguoinuoi@example.com', smtp_configured: true } })),
+    saveSettings: (d) => safeCall(() => api.notify.saveSettings(d), () => ({ ok: true })),
+    sendTest: (email) => safeCall(() => api.notify.sendTest(email), () => ({ ok: true, message: 'Đã gửi thử nghiệm thành công (Demo)' })),
+    getLogs: (p) => safeCall(() => api.notify.getLogs(p), () => ({ ok: true, data: [], total: 0 })),
+    getIncidents: (p) => safeCall(() => api.notify.getIncidents(p), () => ({ ok: true, incidents: [] })),
   },
 };

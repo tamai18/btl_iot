@@ -380,6 +380,9 @@ async function loadOverview() {
     navBadge.textContent = pendingCount;
     navBadge.style.display = pendingCount > 0 ? 'inline-block' : 'none';
 
+    // Cập nhật widget cảnh báo qua Email trên trang Tổng quan
+    loadEmailAlertWidget();
+
   } catch(e) {
     console.error('loadOverview error:', e);
   }
@@ -1462,6 +1465,10 @@ async function loadConfig(showToast = false) {
       tbody.innerHTML = rowsHtml;
     }
 
+    // Tải cấu hình cảnh báo email & danh sách người nhận
+    loadEmailAlertWidget();
+    loadEmailRecipientsTable();
+
     if (showToast) {
       toast('🔄 Đã tải lại cấu hình từ server!', 'info');
     }
@@ -1895,6 +1902,177 @@ window.sendCmd = async function(command, payload = '1') {
     toast(`❌ Lỗi gửi lệnh: ${err.message || 'Mất kết nối máy chủ'}`, 'error');
   }
 };
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  CẢNH BÁO QUA EMAIL (RULE ENGINE NOTIFICATIONS)
+// ══════════════════════════════════════════════════════════════════════════════
+async function loadEmailAlertWidget() {
+  try {
+    const res = await safeAPI.notify.getSettings();
+    if (res && res.settings) {
+      const s = res.settings;
+      const ovToggle = document.getElementById('email-alert-toggle');
+      if (ovToggle) ovToggle.checked = Boolean(s.mail_enabled);
+
+      const cfgToggle = document.getElementById('cfg-email-toggle');
+      if (cfgToggle) cfgToggle.checked = Boolean(s.mail_enabled);
+
+      const ovInput = document.getElementById('email-alert-input');
+      if (ovInput && s.recipient_default) {
+        ovInput.value = s.recipient_default;
+      }
+    }
+  } catch (err) {
+    console.debug('loadEmailAlertWidget error:', err);
+  }
+}
+
+async function saveEmailAlert() {
+  const input = document.getElementById('email-alert-input');
+  const toggle = document.getElementById('email-alert-toggle');
+  const email = (input ? input.value : '').trim();
+  const enabled = toggle ? toggle.checked : true;
+
+  if (!email || !email.includes('@') || !email.includes('.')) {
+    toast('❌ Vui lòng nhập địa chỉ email hợp lệ', 'warning');
+    if (input) input.focus();
+    return;
+  }
+
+  const btn = document.getElementById('btn-save-email');
+  if (btn) btn.disabled = true;
+
+  try {
+    await safeAPI.notify.saveSettings({
+      mail_enabled: enabled,
+      recipient_default: email,
+    });
+    toast('💾 Đã lưu cấu hình email nhận cảnh báo thành công!', 'success');
+  } catch (err) {
+    toast(`❌ Lỗi lưu email: ${err.message || 'Không thể lưu'}`, 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function sendTestEmail() {
+  const ovInput = document.getElementById('email-alert-input');
+  const cfgInput = document.getElementById('cfg-new-email');
+  const email = ((ovInput && ovInput.value) || (cfgInput && cfgInput.value) || '').trim();
+
+  if (!email || !email.includes('@')) {
+    toast('❌ Vui lòng nhập địa chỉ email cần gửi thử', 'warning');
+    return;
+  }
+
+  const btnOv = document.getElementById('btn-test-email');
+  if (btnOv) {
+    btnOv.disabled = true;
+    btnOv.innerHTML = '⏳ Đang gửi...';
+  }
+
+  try {
+    toast(`⏳ Đang gửi email thử nghiệm tới ${email}...`, 'info');
+    const res = await safeAPI.notify.sendTest(email);
+    if (res && res.ok) {
+      toast(`✈️ ${res.message || 'Đã gửi email thử nghiệm thành công! Vui lòng kiểm tra hộp thư.'}`, 'success');
+    } else {
+      toast(`❌ Không thể gửi email: ${res.error || 'Lỗi gửi mail'}`, 'error');
+    }
+  } catch (err) {
+    toast(`❌ Lỗi gửi email: ${err.message || 'Mất kết nối máy chủ'}`, 'error');
+  } finally {
+    if (btnOv) {
+      btnOv.disabled = false;
+      btnOv.innerHTML = '<span style="font-size:14px;">✈️</span> Gửi thử';
+    }
+  }
+}
+
+async function toggleEmailAlert(enabled) {
+  const ovToggle = document.getElementById('email-alert-toggle');
+  if (ovToggle) ovToggle.checked = enabled;
+  const cfgToggle = document.getElementById('cfg-email-toggle');
+  if (cfgToggle) cfgToggle.checked = enabled;
+
+  try {
+    await safeAPI.notify.saveSettings({ mail_enabled: enabled });
+    toast(enabled ? '🔔 Đã BẬT hệ thống cảnh báo qua email' : '🔕 Đã TẮT cảnh báo qua email', 'info');
+  } catch (err) {
+    toast(`❌ Không thể cập nhật trạng thái email: ${err.message}`, 'error');
+  }
+}
+
+async function loadEmailRecipientsTable() {
+  const tbody = document.getElementById('cfg-recipients-tbody');
+  if (!tbody) return;
+
+  try {
+    const res = await safeAPI.notify.getRecipients();
+    const list = res.recipients || [];
+    if (list.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:var(--text-secondary); padding:16px;">Chưa có người nhận nào trong danh bạ</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = list.map(r => `
+      <tr>
+        <td><strong>${escapeHtml(r.email)}</strong></td>
+        <td>${escapeHtml(r.name || 'Người nuôi cá')}</td>
+        <td>
+          <span class="badge ${r.enabled ? 'badge-success' : 'badge-danger'}">
+            ${r.enabled ? 'Đang nhận thư' : 'Tạm dừng'}
+          </span>
+        </td>
+        <td style="text-align:right;">
+          <button class="btn btn-outline btn-sm" onclick="deleteEmailRecipient(${r.id})" style="color:var(--danger); border-color:#fecaca;" title="Xóa người nhận">
+            🗑 Xóa
+          </button>
+        </td>
+      </tr>
+    `).join('');
+  } catch (err) {
+    console.debug('loadEmailRecipientsTable error:', err);
+  }
+}
+
+async function addEmailRecipient() {
+  const emailEl = document.getElementById('cfg-new-email');
+  const nameEl = document.getElementById('cfg-new-email-name');
+  const email = (emailEl ? emailEl.value : '').trim();
+  const name = (nameEl ? nameEl.value : '').trim() || 'Người nuôi cá';
+
+  if (!email || !email.includes('@') || !email.includes('.')) {
+    toast('❌ Vui lòng nhập địa chỉ email hợp lệ', 'warning');
+    if (emailEl) emailEl.focus();
+    return;
+  }
+
+  try {
+    const res = await safeAPI.notify.addRecipient(email, name);
+    if (res && res.ok) {
+      toast(`✅ Đã thêm người nhận: ${email}`, 'success');
+      if (emailEl) emailEl.value = '';
+      if (nameEl) nameEl.value = '';
+      loadEmailRecipientsTable();
+    } else {
+      toast(`❌ Không thể thêm: ${res.error || 'Lỗi'}`, 'error');
+    }
+  } catch (err) {
+    toast(`❌ Lỗi thêm người nhận: ${err.message}`, 'error');
+  }
+}
+
+async function deleteEmailRecipient(id) {
+  if (!confirm('Bạn có chắc chắn muốn xóa địa chỉ email này khỏi danh bạ nhận cảnh báo?')) return;
+  try {
+    await safeAPI.notify.deleteRecipient(id);
+    toast('✅ Đã xóa người nhận thành công', 'success');
+    loadEmailRecipientsTable();
+  } catch (err) {
+    toast(`❌ Lỗi xóa: ${err.message}`, 'error');
+  }
+}
 
 // ── Auto-refresh ──────────────────────────────────────────────────────────────
 function startAutoRefresh() {

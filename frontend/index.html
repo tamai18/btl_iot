@@ -123,13 +123,51 @@
           <div class="card-header"><span class="card-title">🔔 Cảnh báo mới nhất</span><a href="#" onclick="navigate('canh-bao')" style="font-size:12px;color:var(--accent)">Xem tất cả →</a></div>
           <div class="alert-list" id="ov-alerts"></div>
         </div>
-        <div class="card">
+        <div class="card mb-16">
           <div class="card-header"><span class="card-title">⚙️ Trạng thái máy bơm</span></div>
           <div class="card-body"><div class="pump-status-box">
             <div class="pump-row"><div class="pump-info"><span class="pump-emoji">💧</span><div><div class="pump-name">Bơm cấp nước (IN)</div><div class="pump-sub">Relay 1 – GPIO 32</div></div></div><div class="pump-badge" id="pump-in-badge"><div class="pump-dot off" id="pump-in-dot"></div><span id="pump-in-text">Tắt</span></div></div>
             <div class="pump-row"><div class="pump-info"><span class="pump-emoji">🟢</span><div><div class="pump-name">Bơm thoát nước (OUT)</div><div class="pump-sub">Relay 2 – GPIO 33</div></div></div><div class="pump-badge" id="pump-out-badge"><div class="pump-dot off" id="pump-out-dot"></div><span id="pump-out-text">Tắt</span></div></div>
-            <div class="pond-diagram"><span class="sensor-icon">📡</span><div class="dist-line" id="ov-dist-line">↕ -- cm</div><div class="pond-body"><div class="pond-water" id="pond-water" style="height:45%"></div></div><div class="pond-label" id="pond-pct">Mực nước: --%</div></div>
+            <div class="pond-diagram" style="display:none;"><span class="sensor-icon">📡</span><div class="dist-line" id="ov-dist-line">↕ -- cm</div><div class="pond-body"><div class="pond-water" id="pond-water" style="height:45%"></div></div><div class="pond-label" id="pond-pct">Mực nước: --%</div></div>
           </div></div>
+        </div>
+
+        <!-- Card: Cảnh báo qua Email (Khớp 100% hình thiết kế) -->
+        <div class="card" id="email-alert-card">
+          <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+            <div style="font-weight:600; font-size:14px; display:flex; align-items:center; gap:8px;">
+              <span style="color:#2563eb; font-size:16px;">✉️</span> Cảnh báo qua Email
+            </div>
+            <label class="toggle-switch" title="Bật/Tắt gửi email cảnh báo">
+              <input type="checkbox" id="email-alert-toggle" checked onchange="toggleEmailAlert(this.checked)">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="card-body" style="padding-top:4px;">
+            <div style="font-size:12px; color:var(--text-secondary); margin-bottom:12px; line-height:1.5;">
+              Nhận email khi có sự cố nguy hiểm hoặc dấu hiệu bất thường (mực nước, bơm, cảm biến, kết nối).
+            </div>
+            <div style="margin-bottom:12px;">
+              <label style="display:block; font-size:12px; font-weight:600; color:var(--text-primary); margin-bottom:6px;">
+                Email nhận cảnh báo
+              </label>
+              <div style="display:flex; align-items:center; gap:8px; border:1px solid #cbd5e1; border-radius:8px; padding:8px 12px; background:#fff;">
+                <span style="color:#94a3b8; font-size:14px;">✉️</span>
+                <input type="email" id="email-alert-input" placeholder="nguoinuoi@example.com" value="nguoinuoi@example.com"
+                       style="border:none; outline:none; background:transparent; font-size:13px; width:100%; color:var(--text-primary);">
+              </div>
+            </div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+              <button class="btn" id="btn-save-email" onclick="saveEmailAlert()"
+                      style="display:flex; align-items:center; justify-content:center; gap:6px; background:#16a34a; border:1px solid #16a34a; color:#fff; border-radius:8px; font-size:13px; font-weight:500; padding:8px 12px; cursor:pointer;">
+                <span style="font-size:14px;">💾</span> Lưu
+              </button>
+              <button class="btn btn-outline" id="btn-test-email" onclick="sendTestEmail()"
+                      style="display:flex; align-items:center; justify-content:center; gap:6px; background:#fff; border:1px solid #cbd5e1; color:#2563eb; border-radius:8px; font-size:13px; font-weight:500; padding:8px 12px; cursor:pointer;">
+                <span style="font-size:14px;">✈️</span> Gửi thử
+              </button>
+            </div>
+          </div>
         </div>
       </aside>
     </div>
@@ -432,6 +470,43 @@
             <label class="form-label">Topic Prefix</label>
             <input type="text" class="form-control" id="cfg-topic-prefix" value="iot">
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 5. Cấu hình Cảnh báo qua Email -->
+    <div class="card" style="margin-bottom:16px;" id="cfg-email-card">
+      <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+        <span class="card-title">✉️ 5. Cấu hình Cảnh báo và Gửi Email Tự động</span>
+        <label class="toggle-switch" title="Bật/Tắt chức năng gửi email">
+          <input type="checkbox" id="cfg-email-toggle" checked onchange="toggleEmailAlert(this.checked)">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="card-body">
+        <div class="cfg-info-box" style="margin-bottom:16px;">
+          ℹ️ Tự động gửi email cảnh báo tới danh sách người nhận khi phát hiện mực nước vượt ngưỡng nguy hiểm, bơm không hiệu quả hoặc mất kết nối.
+        </div>
+        <div style="display:flex; gap:10px; margin-bottom:16px; flex-wrap:wrap;">
+          <input type="email" id="cfg-new-email" class="form-control" placeholder="Nhập địa chỉ email người nhận (ví dụ: chu_ao@gmail.com)" style="flex:1; min-width:240px;">
+          <input type="text" id="cfg-new-email-name" class="form-control" placeholder="Tên người nhận (ví dụ: Kỹ thuật viên)" style="width:160px;">
+          <button class="btn btn-primary" onclick="addEmailRecipient()">➕ Thêm người nhận</button>
+          <button class="btn btn-outline" onclick="sendTestEmail()">✈️ Gửi thử nghiệm</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Email nhận thông báo</th>
+                <th>Tên người nhận</th>
+                <th>Trạng thái</th>
+                <th style="text-align:right;">Thao tác</th>
+              </tr>
+            </thead>
+            <tbody id="cfg-recipients-tbody">
+              <!-- Render tự động qua API -->
+            </tbody>
+          </table>
         </div>
       </div>
     </div>
@@ -752,13 +827,7 @@
 
           <!-- Thanh nhập câu hỏi -->
           <div class="chat-input-bar">
-            <button class="chat-tool-btn" title="Đính kèm tệp / hình ảnh" onclick="toast('Tính năng tải ảnh ao nuôi đang phát triển', 'info')">
-              📎
-            </button>
             <input type="text" class="chat-input-text" id="chat-input-text" placeholder='Nhập câu hỏi (ví dụ: "Tóm tắt hoạt động hôm nay", "Bật bơm cấp", ...)'>
-            <button class="chat-tool-btn" title="Nhập bằng giọng nói" onclick="toast('Tính năng nhận diện giọng nói đang phát triển', 'info')">
-              🎤
-            </button>
             <button class="chat-send-btn" id="chat-send-btn" onclick="sendChatMessage()" title="Gửi câu hỏi">
               <svg viewBox="0 0 24 24">
                 <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>

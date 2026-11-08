@@ -166,5 +166,64 @@ INSERT INTO system_config (config_key, config_value, description) VALUES
 ('alert_buzzer',   '1',               'Bật còi cảnh báo'),
 ('alert_led',      '1',               'Bật đèn LED cảnh báo'),
 ('web_version',    '1.0.0',           'Phiên bản phần mềm web'),
-('language',       'vi',              'Ngôn ngữ giao diện')
+('language',       'vi',              'Ngôn ngữ giao diện'),
+('mail_enabled',   '1',               'Bật/tắt gửi email cảnh báo tự động'),
+('mail_recipient_default', 'nguoinuoi@example.com', 'Email nhận cảnh báo chính')
 ON DUPLICATE KEY UPDATE config_value = VALUES(config_value);
+
+-- ============================================================================
+-- Bảng 6: notification_recipients
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS notification_recipients (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    email VARCHAR(255) NOT NULL UNIQUE,
+    name VARCHAR(100) DEFAULT 'Người nuôi cá',
+    enabled TINYINT(1) DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================================
+-- Bảng 7: incidents
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS incidents (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    event_key VARCHAR(50) NOT NULL,
+    severity VARCHAR(20) NOT NULL,
+    device_id VARCHAR(50) DEFAULT 'esp32-ao-01',
+    status VARCHAR(20) DEFAULT 'ACTIVE',
+    water_level_at_detect DOUBLE NULL,
+    pump_in_at_detect INT DEFAULT 0,
+    pump_out_at_detect INT DEFAULT 0,
+    started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    recovered_at TIMESTAMP NULL,
+    last_notified_at TIMESTAMP NULL,
+    remind_count INT DEFAULT 0,
+    source VARCHAR(50) DEFAULT 'backend_rule',
+    notes TEXT NULL,
+    INDEX idx_incident_lookup (event_key, device_id, status),
+    INDEX idx_incident_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================================
+-- Bảng 8: notification_outbox
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS notification_outbox (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    incident_id INT NULL,
+    recipient_id INT NULL,
+    recipient_email VARCHAR(255) NOT NULL,
+    subject VARCHAR(255) NOT NULL,
+    body_html MEDIUMTEXT NOT NULL,
+    status VARCHAR(20) DEFAULT 'PENDING',
+    scheduled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    sent_at TIMESTAMP NULL,
+    attempt_count INT DEFAULT 0,
+    last_error TEXT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_outbox_queue (status, scheduled_at),
+    INDEX idx_outbox_sent (sent_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT IGNORE INTO notification_recipients (email, name, enabled)
+VALUES ('nguoinuoi@example.com', 'Chủ ao nuôi cá', 1);

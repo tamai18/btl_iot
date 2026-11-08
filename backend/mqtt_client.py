@@ -199,6 +199,24 @@ def _on_message(client, userdata, msg):
         _resolve_alerts_from_sensor(d)
         # Bỏ ghi log rác data_received mỗi 2s để tránh làm ngập database
 
+        # Chuyển tiếp tới bộ quy tắc thông báo email
+        try:
+            from notifications.notifier import on_telemetry_received
+            status_dict = {
+                "water_level": float(d.get("level", 0)),
+                "distance_cm": float(d.get("dist", 0)),
+                "pump_in": int(bool(d.get("in", 0))),
+                "pump_out": int(bool(d.get("out", 0))),
+                "auto_mode": int(bool(d.get("auto", 1))),
+                "sensor_err": int(bool(d.get("err", 0))),
+                "fault_code": str(d.get("fault", "none")),
+                "esp32_id": _extract_esp32_id(d),
+                "esp32_status": "online",
+            }
+            on_telemetry_received(status_dict)
+        except Exception as _ne:
+            logger.debug(f"[MQTT->Notifier] on_telemetry_received error: {_ne}")
+
     # ── /alert ───────────────────────────────────────────────────────────────
     elif topic == f"{P}/alert":
         try:
@@ -217,6 +235,13 @@ def _on_message(client, userdata, msg):
                 logger.info(f"[ALERT] {sev} {code}: {msg_txt}")
             else:
                 logger.info(f"[ALERT] Bỏ qua cảnh báo lặp {code} trong cùng đợt sự cố")
+
+            # Kích hoạt thông báo email nếu là cảnh báo từ thiết bị
+            try:
+                from notifications.notifier import on_esp32_alert
+                on_esp32_alert(d)
+            except Exception as _ne:
+                logger.debug(f"[MQTT->Notifier] on_esp32_alert error: {_ne}")
         except Exception as e:
             logger.error(f"[DB] alert insert error: {e}")
 
@@ -310,13 +335,12 @@ def start():
     global _client
     if _client is not None:
         return
-    try:
-        _client = mqtt_lib.Client(
-            mqtt_lib.CallbackAPIVersion.VERSION2,
-            client_id="flask-ao-backend",
-        )
-    except (AttributeError, TypeError):
-        _client = mqtt_lib.Client(client_id="flask-ao-backend")
+    # Tương thích cả paho-mqtt v1.x (như 1.6.1) và v2.x
+    client_kwargs = {"client_id": "flask-ao-backend"}
+    if hasattr(mqtt_lib, "CallbackAPIVersion"):
+        client_kwargs["callback_api_version"] = getattr(mqtt_lib, "CallbackAPIVersion").VERSION2
+
+    _client = mqtt_lib.Client(**client_kwargs)
     _client.username_pw_set(
         os.getenv("MQTT_USER", "esp32"),
         os.getenv("MQTT_PASS", "esp32pass"),

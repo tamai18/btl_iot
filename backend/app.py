@@ -29,6 +29,9 @@ CORS(app)
 from chat import chat_bp
 app.register_blueprint(chat_bp)
 
+from notifications.notify_api import notify_bp
+app.register_blueprint(notify_bp)
+
 FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend")
 
 # ── Hàm khởi động MQTT ────────────────────────────────────────────────────────
@@ -620,6 +623,13 @@ def _serialize(row):
 
 if __name__ == "__main__":
     start_mqtt()
+    try:
+        from notifications.mail_worker import start_mail_worker
+        from notifications.notify_watchdog import start_watchdog
+        start_mail_worker()
+        start_watchdog()
+    except Exception as _e:
+        logger.warning(f"[App] start notification services error: {_e}")
     app.run(
         host=os.getenv("FLASK_HOST", "0.0.0.0"),
         port=int(os.getenv("FLASK_PORT", 5000)),
