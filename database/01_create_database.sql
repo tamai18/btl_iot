@@ -162,7 +162,7 @@ INSERT INTO system_config (config_key, config_value, description) VALUES
 ('publish_sec',    '2',               'Chu kỳ gửi dữ liệu MQTT (giây)'),
 ('mqtt_broker',    '192.168.1.100',   'IP MQTT Broker'),
 ('mqtt_port',      '1883',            'Cổng MQTT'),
-('topic_prefix',   'iot-ao-demo-123', 'Tiền tố topic MQTT'),
+('topic_prefix',   'iot',             'Tiền tố topic MQTT'),
 ('alert_buzzer',   '1',               'Bật còi cảnh báo'),
 ('alert_led',      '1',               'Bật đèn LED cảnh báo'),
 ('web_version',    '1.0.0',           'Phiên bản phần mềm web'),
