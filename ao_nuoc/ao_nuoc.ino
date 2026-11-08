@@ -238,6 +238,14 @@ void changeMode(bool toAuto) {
   }
 }
 
+bool canReset(const char*& reason) {
+  if (sensorErr)            { reason = "sensor_error"; return false; }
+  if (!haveLevel)           { reason = "no_level"; return false; }
+  if (level >= LIMIT_HIGH)  { reason = "high_limit"; return false; }
+  if (level <= LIMIT_LOW)   { reason = "low_limit"; return false; }
+  return true;
+}
+
 void setFault(const char* code, const char* msg) {
   stopAll();
   fault = true; faultMsg = code;
@@ -263,9 +271,16 @@ void onMsg(char* t, byte* b, unsigned int n) {
   else if (s.endsWith("/cmd/pump_in") || s.endsWith("/cmd/pump_out")) {
     int p = s.endsWith("/cmd/pump_in") ? PUMP_IN : PUMP_OUT;
     bool want = isOn(m);
-    autoMode = false;                        // lenh tay -> chuyen sang MANUAL
-    if (setPump(p, want)) ack(want ? "ok:pump=ON" : "ok:pump=OFF");
-    else { char b2[48]; snprintf(b2, sizeof(b2), "rejected:%s", rejectReason); ack(b2); }
+    if (setPump(p, want)) {
+      autoMode = false;                        // lenh tay hop le -> chuyen sang MANUAL
+      char b2[32];
+      snprintf(b2, sizeof(b2), "ok:%s=%s", (p == PUMP_IN ? "pump_in" : "pump_out"), want ? "ON" : "OFF");
+      ack(b2);
+    } else {
+      char b2[48];
+      snprintf(b2, sizeof(b2), "rejected:%s", rejectReason);
+      ack(b2);
+    }
     dirty = true;
   }
   else if (s.endsWith("/cmd/threshold")) {          // chinh nguong bat/tat
@@ -289,12 +304,34 @@ void onMsg(char* t, byte* b, unsigned int n) {
       cfg.dEmpty = e; cfg.dFull = f; saveCfg(); publishCfg(); ack("ok:calib");
     } else ack("err:calib");
   }
-  else if (s.endsWith("/cmd/reset")) {             // xoa loi chot va co canh bao
-    fault = false; faultMsg = "none"; badCount = 0;
-    aSensor = aHigh = aLow = false;
-    ack("ok:reset"); dirty = true;
+  else if (s.endsWith("/cmd/reset")) {             // xoa loi chot va co canh bao co kiem tra an toan
+    stopAll(); // 1. Luon ngat hai bom ve trang thai OFF trong luc reset
+    const char* unsafeReason = nullptr;
+    if (!canReset(unsafeReason)) {
+      // 4. Neu dieu kien chua an toan, tu choi reset va tra ve err:reset_unsafe
+      char bErr[48];
+      snprintf(bErr, sizeof(bErr), "err:reset_unsafe (%s)", unsafeReason ? unsafeReason : "condition");
+      ack(bErr);
+      Serial.printf("[RESET REJECTED] %s\n", bErr);
+    } else {
+      // 1. Dieu kien cam bien va van hanh phu hop: xoa loi
+      fault = false; faultMsg = "none"; badCount = 0;
+      aSensor = aHigh = aLow = false;
+      noFlowCount[PUMP_IN] = 0;
+      noFlowCount[PUMP_OUT] = 0;
+
+      // 3. Khong tu dong bat lai bom ngay sau Reset: chuyen sang MANUAL va cap nhat moc nghi toi thieu
+      autoMode = false;
+      unsigned long now = millis();
+      pumpStop[PUMP_IN] = now;
+      pumpStop[PUMP_OUT] = now;
+
+      ack("ok:reset");
+      Serial.println("[RESET OK] Loi da duoc xoa, he thong chuyen sang che do MANUAL");
+    }
+    dirty = true;
   }
-  else if (s.endsWith("/cmd/get")) { publishCfg(); dirty = true; }           // gui lai cau hinh
+  else if (s.endsWith("/cmd/get")) { publishCfg(); ack("ok:get"); dirty = true; }           // gui lai cau hinh
   else if (s.endsWith("/cmd/restart")) { ack("ok:restart"); mqtt.loop(); delay(300); ESP.restart(); }        //khoi dong lai ESP32
 }
 
