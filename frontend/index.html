@@ -6,6 +6,7 @@
 <title>Hệ thống giám sát mực nước ao nuôi – IoT ESP32 MQTT</title>
 <meta name="description" content="Hệ thống giám sát và điều khiển mực nước ao nuôi thông minh sử dụng ESP32, HC-SR04, MQTT và Flask">
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="chat.css">
 <script src="chart.umd.min.js"></script>
 <script>
   if (typeof Chart === 'undefined') {
@@ -42,6 +43,9 @@
     <a class="nav-item" id="nav-lich-su" onclick="navigate('lich-su')">
       <span class="nav-icon">📋</span> Lịch sử dữ liệu
     </a>
+    <a class="nav-item" id="nav-tro-ly-ai" onclick="navigate('tro-ly-ai')">
+      <span class="nav-icon">💬</span> Trợ lý AI (Chatbox)
+    </a>
   </nav>
 </aside>
 
@@ -50,9 +54,12 @@
 
   <!-- Top Bar -->
   <header class="topbar">
-    <div class="topbar-left">
-      <div class="topbar-title">Hệ thống giám sát và điều khiển mực nước ao nuôi</div>
-      <div class="topbar-sub">IoT · ESP32 · MQTT</div>
+    <div class="topbar-left" style="display:flex;align-items:center;">
+      <button class="btn btn-outline btn-sm mobile-menu-btn" id="mobile-menu-toggle" onclick="toggleSidebar()" style="display:none;margin-right:10px;font-size:16px;padding:4px 10px;">☰</button>
+      <div>
+        <div class="topbar-title">Hệ thống giám sát và điều khiển mực nước ao nuôi</div>
+        <div class="topbar-sub">IoT · ESP32 · MQTT</div>
+      </div>
     </div>
     <div class="topbar-right">
       <div class="status-badge">
@@ -257,11 +264,11 @@
       </div>
       <div class="card-body">
         <div class="feedback-box">
-          <div class="feedback-check-circle">✓</div>
+          <div class="feedback-check-circle" id="feedback-icon">✓</div>
           <div class="feedback-info">
-            <div class="feedback-time" id="feedback-time">21:45:30</div>
-            <div class="feedback-cmd" id="feedback-cmd">Nhận lệnh: Bật bơm cấp (IN)</div>
-            <div class="feedback-result text-success" id="feedback-result">Kết quả: Thành công</div>
+            <div class="feedback-time" id="feedback-time">--</div>
+            <div class="feedback-cmd" id="feedback-cmd">Chưa có lệnh điều khiển</div>
+            <div class="feedback-result text-muted" id="feedback-result">Chưa có phản hồi</div>
           </div>
         </div>
       </div>
@@ -375,7 +382,7 @@
             <div style="font-size:11.5px;color:var(--text-secondary);margin-top:4px">Khoảng cách từ cảm biến đến mặt nước khi mực nước = 100%</div>
           </div>
           <div style="display:flex;gap:8px;">
-            <button class="btn btn-outline btn-sm" onclick="sendCmd('get','1')">🔄 Lấy cấu hình từ ESP32</button>
+            <button class="btn btn-outline btn-sm" onclick="sendCmd('get','GET')">🔄 Lấy cấu hình từ ESP32</button>
           </div>
         </div>
       </div>
@@ -423,19 +430,7 @@
           </div>
           <div class="form-group">
             <label class="form-label">Topic Prefix</label>
-            <input type="text" class="form-control" id="cfg-topic-prefix" value="iot-ao-demo-123">
-          </div>
-          <div style="display:flex;align-items:center;gap:12px;margin-top:6px;">
-            <label class="form-label" style="margin:0;">Đèn LED cảnh báo</label>
-            <label class="toggle-switch">
-              <input type="checkbox" id="cfg-alert-led" checked>
-              <div class="toggle-slider"></div>
-            </label>
-            <label class="form-label" style="margin:0;">Còi cảnh báo</label>
-            <label class="toggle-switch">
-              <input type="checkbox" id="cfg-alert-buzzer" checked>
-              <div class="toggle-slider"></div>
-            </label>
+            <input type="text" class="form-control" id="cfg-topic-prefix" value="iot">
           </div>
         </div>
       </div>
@@ -445,9 +440,9 @@
     <div class="card">
       <div class="card-body" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
         <button class="btn btn-primary btn-lg" onclick="saveAndSendConfig()">💾 Lưu cấu hình và gửi xuống ESP32</button>
-        <button class="btn btn-outline" onclick="loadConfig()">🔄 Tải lại từ server</button>
-        <button class="btn btn-warning" onclick="sendCmd('reset','1')">⚠ Xóa lỗi cảnh báo (Reset)</button>
-        <button class="btn btn-danger"  onclick="sendCmd('restart','1')">⚡ Khởi động lại ESP32</button>
+        <button class="btn btn-outline" onclick="loadConfig(true)">🔄 Tải lại từ server</button>
+        <button class="btn btn-warning" onclick="sendCmd('reset','RESET')">⚠ Xóa lỗi cảnh báo (Reset)</button>
+        <button class="btn btn-danger"  onclick="sendCmd('restart','RESTART')">⚡ Khởi động lại ESP32</button>
       </div>
     </div>
 
@@ -653,12 +648,147 @@
     </div>
   </div>
 
+  <!-- ═══════════════ TRANG TRỢ LÝ AI (CHATBOX) ═══════════════ -->
+  <div class="page" id="page-tro-ly-ai">
+    <div class="chat-page">
+
+      <!-- Top Banner Header -->
+      <div class="chat-banner">
+        <div class="chat-banner-left">
+          <div class="chat-banner-avatar">🤖</div>
+          <div class="chat-banner-info">
+            <div class="chat-banner-title-row">
+              <h2 class="chat-banner-title">Trợ lý AI – Ao nuôi</h2>
+              <span class="chat-badge-online">
+                <span class="chat-badge-dot"></span> Online
+              </span>
+            </div>
+            <p class="chat-banner-sub">Hỏi đáp, phân tích dữ liệu và hỗ trợ điều khiển hệ thống ao nuôi bằng ngôn ngữ tự nhiên.</p>
+          </div>
+        </div>
+        <div class="chat-banner-right">
+          <svg class="chat-banner-illustration" viewBox="0 0 220 80" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <ellipse cx="110" cy="48" rx="100" ry="28" fill="#38BDF8" fill-opacity="0.35"/>
+            <ellipse cx="110" cy="48" rx="88" ry="22" fill="#0284C7" fill-opacity="0.55"/>
+            <path d="M70 48 Q90 42 110 48 T150 48" stroke="#E0F2FE" stroke-width="2" stroke-linecap="round" stroke-dasharray="4 4"/>
+            <!-- Fish 1 -->
+            <path d="M60 46 C65 43 72 45 76 47 C72 49 65 51 60 48 Z" fill="#F97316"/>
+            <!-- Fish 2 -->
+            <path d="M140 44 C145 42 152 43 155 45 C152 47 145 48 140 46 Z" fill="#FB923C"/>
+            <!-- Water Pump / Station on edge -->
+            <rect x="168" y="22" width="22" height="26" rx="4" fill="#0284C7"/>
+            <rect x="172" y="16" width="14" height="8" rx="2" fill="#38BDF8"/>
+            <path d="M174 48 L174 56 C174 58 170 60 166 60" stroke="#0369A1" stroke-width="3" stroke-linecap="round"/>
+            <!-- Greenery around pond -->
+            <circle cx="28" cy="40" r="14" fill="#4ADE80" fill-opacity="0.7"/>
+            <circle cx="38" cy="36" r="11" fill="#22C55E" fill-opacity="0.8"/>
+            <circle cx="196" cy="38" r="13" fill="#22C55E" fill-opacity="0.75"/>
+          </svg>
+        </div>
+      </div>
+
+      <!-- Main Chat Grid (Suggestions Left + Messages Right) -->
+      <div class="chat-main-grid">
+
+        <!-- Cột trái: Câu hỏi gợi ý -->
+        <div class="chat-suggestions-card">
+          <div class="chat-suggestions-header">
+            <h3 class="chat-suggestions-title">💡 Câu hỏi gợi ý</h3>
+            <button class="chat-suggestions-toggle" id="chat-suggestions-toggle-btn" onclick="toggleSuggestions()" title="Thu gọn/Mở rộng">▲</button>
+          </div>
+          <div class="chat-suggestions-list" id="chat-suggestions-list">
+            <button class="chat-suggest-btn" onclick="sendSuggestion('Ao còn nước không?')">
+              <span class="chat-suggest-btn-left">
+                <span class="chat-suggest-btn-icon">💧</span>
+                <span>Ao còn nước không?</span>
+              </span>
+              <span class="chat-suggest-btn-arrow">›</span>
+            </button>
+
+            <button class="chat-suggest-btn" onclick="sendSuggestion('Bơm cấp và bơm xả đang thế nào?')">
+              <span class="chat-suggest-btn-left">
+                <span class="chat-suggest-btn-icon">🚰</span>
+                <span>Bơm cấp và bơm xả đang thế nào?</span>
+              </span>
+              <span class="chat-suggest-btn-arrow">›</span>
+            </button>
+
+            <button class="chat-suggest-btn" onclick="sendSuggestion('Trong 30 phút qua nước tăng bao nhiêu?')">
+              <span class="chat-suggest-btn-left">
+                <span class="chat-suggest-btn-icon">📈</span>
+                <span>Trong 30 phút qua nước tăng bao nhiêu?</span>
+              </span>
+              <span class="chat-suggest-btn-arrow">›</span>
+            </button>
+
+            <button class="chat-suggest-btn" onclick="sendSuggestion('Tóm tắt tình trạng ao hôm nay.')">
+              <span class="chat-suggest-btn-left">
+                <span class="chat-suggest-btn-icon">📅</span>
+                <span>Tóm tắt tình trạng ao hôm nay.</span>
+              </span>
+              <span class="chat-suggest-btn-arrow">›</span>
+            </button>
+
+            <button class="chat-suggest-btn" onclick="sendSuggestion('Bật bơm cấp nước vào ao.')">
+              <span class="chat-suggest-btn-left">
+                <span class="chat-suggest-btn-icon">▶</span>
+                <span>Bật bơm cấp nước vào ao.</span>
+              </span>
+              <span class="chat-suggest-btn-arrow">›</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Cột phải: Cửa sổ hội thoại -->
+        <div class="chat-window-card">
+          <div class="chat-window-topbar">
+            <button class="chat-btn-clear" onclick="clearChatHistory()">
+              <span>🗑</span> Xóa hội thoại
+            </button>
+          </div>
+
+          <!-- Danh sách tin nhắn -->
+          <div class="chat-messages" id="chat-messages"></div>
+
+          <!-- Thanh nhập câu hỏi -->
+          <div class="chat-input-bar">
+            <button class="chat-tool-btn" title="Đính kèm tệp / hình ảnh" onclick="toast('Tính năng tải ảnh ao nuôi đang phát triển', 'info')">
+              📎
+            </button>
+            <input type="text" class="chat-input-text" id="chat-input-text" placeholder='Nhập câu hỏi (ví dụ: "Tóm tắt hoạt động hôm nay", "Bật bơm cấp", ...)'>
+            <button class="chat-tool-btn" title="Nhập bằng giọng nói" onclick="toast('Tính năng nhận diện giọng nói đang phát triển', 'info')">
+              🎤
+            </button>
+            <button class="chat-send-btn" id="chat-send-btn" onclick="sendChatMessage()" title="Gửi câu hỏi">
+              <svg viewBox="0 0 24 24">
+                <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+  </div>
+
 </div><!-- /.main-content -->
 
 <!-- Toast container -->
 <div class="toast-container" id="toast-container"></div>
 
+<!-- Alert detail modal -->
+<div class="alert-modal" id="alert-modal" hidden onclick="closeAlertModal(event)">
+  <div class="alert-modal-card" role="dialog" aria-modal="true" aria-labelledby="alert-modal-title">
+    <button class="alert-modal-close" type="button" aria-label="Đóng" onclick="closeAlertModal()">×</button>
+    <div class="alert-modal-icon">i</div>
+    <h2 id="alert-modal-title">Cảnh báo</h2>
+    <p id="alert-modal-message"></p>
+  </div>
+</div>
+
 <script src="api.js"></script>
 <script src="app.js"></script>
+<script src="chat.js"></script>
 </body>
 </html>
