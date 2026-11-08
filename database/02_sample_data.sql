@@ -40,25 +40,25 @@ FROM sensor_data;
 -- Dữ liệu mẫu: alerts
 -- ============================================================================
 INSERT INTO alerts (created_at, alert_code, message, severity, water_level, value_str, status, resolved_at, resolved_by) VALUES
-(NOW() - INTERVAL 5 MINUTE,  'HIGH_LEVEL',   'Mực nước đạt 92% (nguy cơ tràn ao)', 'DANGER',  92.0, '92 %',   'UNRESOLVED',  NULL, NULL),
-(NOW() - INTERVAL 25 MINUTE, 'PUMP_IN_OFF',  'Máy bơm cấp đã tắt',                 'WARNING', 50.5, NULL,     'RESOLVED', NOW() - INTERVAL 20 MINUTE, 'system'),
-(NOW() - INTERVAL 45 MINUTE, 'MODE',         'Chế độ MANUAL được kích hoạt',        'INFO',    43.2, NULL,     'RESOLVED', NOW() - INTERVAL 40 MINUTE, 'system'),
-(NOW() - INTERVAL 2 HOUR,    'HIGH_TREND',   'Mực nước tăng nhanh',                 'WARNING', 65.0, '+5.2 %/h','RESOLVED', NOW() - INTERVAL 90 MINUTE, 'system'),
-(NOW() - INTERVAL 6 HOUR,    'SENSOR',       'Cảm biến đo không ổn định',           'WARNING', 40.0, NULL,     'RESOLVED', NOW() - INTERVAL 5 HOUR, 'user'),
-(NOW() - INTERVAL 8 HOUR,    'PUMP_IN',      'Máy bơm cấp đã bật',                 'INFO',    28.5, NULL,     'RESOLVED', NOW() - INTERVAL 7 HOUR, 'system'),
-(NOW() - INTERVAL 12 HOUR,   'LOW_LEVEL',    'Mực nước thấp, nguy cơ cạn ao',       'DANGER',  4.5,  '4.5 %',  'RESOLVED', NOW() - INTERVAL 11 HOUR, 'system'),
-(NOW() - INTERVAL 1 DAY,     'PUMP_OVERRUN', 'Bơm chạy quá 20 phút liên tục',      'DANGER',  78.0, '22 phút','RESOLVED', NOW() - INTERVAL 23 HOUR, 'user');
+(NOW() - INTERVAL 5 MINUTE,  'high_level',   'Mực nước đạt 92% (nguy cơ tràn ao)', 'DANGER',  92.0, '92 %',   'UNRESOLVED',  NULL, NULL),
+(NOW() - INTERVAL 25 MINUTE, 'pump_in_off',  'Máy bơm cấp đã tắt',                 'WARNING', 50.5, NULL,     'RESOLVED', NOW() - INTERVAL 20 MINUTE, 'system'),
+(NOW() - INTERVAL 45 MINUTE, 'mode',         'Chế độ MANUAL được kích hoạt',        'INFO',    43.2, NULL,     'RESOLVED', NOW() - INTERVAL 40 MINUTE, 'system'),
+(NOW() - INTERVAL 2 HOUR,    'high_trend',   'Mực nước tăng nhanh',                 'WARNING', 65.0, '+5.2 %/h','RESOLVED', NOW() - INTERVAL 90 MINUTE, 'system'),
+(NOW() - INTERVAL 6 HOUR,    'sensor_error', 'Cảm biến đo không ổn định',           'WARNING', 40.0, NULL,     'RESOLVED', NOW() - INTERVAL 5 HOUR, 'user'),
+(NOW() - INTERVAL 8 HOUR,    'pump_in',      'Máy bơm cấp đã bật',                 'INFO',    28.5, NULL,     'RESOLVED', NOW() - INTERVAL 7 HOUR, 'system'),
+(NOW() - INTERVAL 12 HOUR,   'low_level',    'Mực nước thấp, nguy cơ cạn ao',       'DANGER',  4.5,  '4.5 %',  'RESOLVED', NOW() - INTERVAL 11 HOUR, 'system'),
+(NOW() - INTERVAL 1 DAY,     'pump_overrun', 'Bơm chạy quá 20 phút liên tục',      'DANGER',  78.0, '22 phút','RESOLVED', NOW() - INTERVAL 23 HOUR, 'user');
 
 -- ============================================================================
 -- Dữ liệu mẫu: control_logs
 -- ============================================================================
 INSERT INTO control_logs (sent_at, acked_at, command, payload, topic, ack_payload, status, initiated_by, client_ip, esp32_id) VALUES
-(NOW() - INTERVAL 30 MINUTE, NOW() - INTERVAL 30 MINUTE + INTERVAL 1 SECOND, 'mode',      'AUTO',        'iot-ao-demo-123/cmd/mode',      'ok:mode=AUTO',    'ACK_OK', 'web', '192.168.1.5', 'esp32-ao-demo'),
-(NOW() - INTERVAL 45 MINUTE, NOW() - INTERVAL 45 MINUTE + INTERVAL 1 SECOND, 'mode',      'MANUAL',      'iot-ao-demo-123/cmd/mode',      'ok:mode=MANUAL',  'ACK_OK', 'web', '192.168.1.5', 'esp32-ao-demo'),
-(NOW() - INTERVAL 46 MINUTE, NOW() - INTERVAL 46 MINUTE + INTERVAL 1 SECOND, 'pump_in',   'ON',          'iot-ao-demo-123/cmd/pump_in',   'ok:pump=ON',      'ACK_OK', 'web', '192.168.1.5', 'esp32-ao-demo'),
-(NOW() - INTERVAL 1 HOUR,    NOW() - INTERVAL 1 HOUR + INTERVAL 1 SECOND,    'threshold', '30,50,90,80', 'iot-ao-demo-123/cmd/threshold', 'ok:threshold',    'ACK_OK', 'web', '192.168.1.5', 'esp32-ao-demo'),
-(NOW() - INTERVAL 2 HOUR,    NULL,                                             'pump_out',  'ON',          'iot-ao-demo-123/cmd/pump_out',  NULL,              'TIMEOUT','web', '192.168.1.5', 'esp32-ao-demo'),
-(NOW() - INTERVAL 3 HOUR,    NOW() - INTERVAL 3 HOUR + INTERVAL 2 SECOND,    'calib',     '100,10',      'iot-ao-demo-123/cmd/calib',     'ok:calib',        'ACK_OK', 'web', '192.168.1.5', 'esp32-ao-demo');
+(NOW() - INTERVAL 30 MINUTE, NOW() - INTERVAL 30 MINUTE + INTERVAL 1 SECOND, 'mode',      'AUTO',        'iot/cmd/mode',      'ok:mode=AUTO',    'ACK_OK', 'web', '192.168.1.5', 'esp32-ao-demo'),
+(NOW() - INTERVAL 45 MINUTE, NOW() - INTERVAL 45 MINUTE + INTERVAL 1 SECOND, 'mode',      'MANUAL',      'iot/cmd/mode',      'ok:mode=MANUAL',  'ACK_OK', 'web', '192.168.1.5', 'esp32-ao-demo'),
+(NOW() - INTERVAL 46 MINUTE, NOW() - INTERVAL 46 MINUTE + INTERVAL 1 SECOND, 'pump_in',   'ON',          'iot/cmd/pump_in',   'ok:pump_in=ON',   'ACK_OK', 'web', '192.168.1.5', 'esp32-ao-demo'),
+(NOW() - INTERVAL 1 HOUR,    NOW() - INTERVAL 1 HOUR + INTERVAL 1 SECOND,    'threshold', '30,50,90,80', 'iot/cmd/threshold', 'ok:threshold',    'ACK_OK', 'web', '192.168.1.5', 'esp32-ao-demo'),
+(NOW() - INTERVAL 2 HOUR,    NULL,                                             'pump_out',  'ON',          'iot/cmd/pump_out',  NULL,              'TIMEOUT','web', '192.168.1.5', 'esp32-ao-demo'),
+(NOW() - INTERVAL 3 HOUR,    NOW() - INTERVAL 3 HOUR + INTERVAL 2 SECOND,    'calib',     '100,10',      'iot/cmd/calib',     'ok:calib',        'ACK_OK', 'web', '192.168.1.5', 'esp32-ao-demo');
 
 -- ============================================================================
 -- Dữ liệu mẫu: system_logs
