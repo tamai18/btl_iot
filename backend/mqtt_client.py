@@ -15,7 +15,7 @@ import db
 logger = logging.getLogger(__name__)
 
 # Topic prefix
-P = os.getenv("MQTT_TOPIC_PREFIX", "iot-ao-demo-123")
+P = os.getenv("MQTT_TOPIC_PREFIX", "iot")
 
 # Dữ liệu mới nhất (shared state, thread-safe read)
 _latest: dict = {}
@@ -40,26 +40,27 @@ def is_connected() -> bool:
 
 
 def _map_severity(code: str, msg: str) -> str:
-    code_upper = code.upper()
-    if any(k in code_upper for k in ("HIGH_LEVEL", "LOW_LEVEL", "OVERRUN", "FAULT", "NO_FLOW")):
+    code_lower = str(code).lower()
+    if any(k in code_lower for k in ("high_level", "low_level", "overrun", "fault", "no_flow")):
         return "DANGER"
-    if any(k in code_upper for k in ("SENSOR", "HIGH_TREND", "TREND", "PUMP")):
+    if any(k in code_lower for k in ("sensor", "trend", "pump")):
         return "WARNING"
     return "INFO"
 
 
 def _active_alert_exists(code: str) -> bool:
+    code_lower = str(code).lower()
     row = db.execute(
-        "SELECT id FROM alerts WHERE alert_code=%s AND status='UNRESOLVED' "
+        "SELECT id FROM alerts WHERE (LOWER(alert_code)=%s) AND status='UNRESOLVED' "
         "ORDER BY created_at DESC LIMIT 1",
-        (code,),
+        (code_lower,),
         fetch="one",
     )
     return bool(row)
 
 
 def _resolve_alerts_from_sensor(data: dict) -> None:
-    """Tự đóng cảnh báo sau khi điều kiện khôi phục ổn định đủ lâu."""
+    """Tự đóng cảnh báo sau khi điều kiện khôi phục ổn định đủ lâu (dùng mã chữ thường)."""
     now = datetime.now()
     try:
         level = float(data.get("level"))
@@ -68,14 +69,19 @@ def _resolve_alerts_from_sensor(data: dict) -> None:
     except (TypeError, ValueError):
         return
 
+    # Danh mục mã cảnh báo dạng chữ thường thống nhất với firmware và nhóm
     checks = [
-        ("HIGH_LEVEL", level < 88, timedelta(minutes=2)),
-        ("LOW_LEVEL", level > 32, timedelta(minutes=2)),
-        ("SENSOR", sensor_valid, timedelta(minutes=1)),
-        ("PUMP_IN_OFF", sensor_valid and "pump_in" not in fault, timedelta(minutes=1)),
-        ("PUMP_OUT_OFF", sensor_valid and "pump_out" not in fault, timedelta(minutes=1)),
-        ("HIGH_TREND", sensor_valid, timedelta(minutes=3)),
-        ("MODE", sensor_valid, timedelta(0)),
+        ("high_level", level < 88, timedelta(minutes=2)),
+        ("low_level", level > 32, timedelta(minutes=2)),
+        ("sensor_error", sensor_valid, timedelta(minutes=1)),
+        ("sensor", sensor_valid, timedelta(minutes=1)),
+        ("pump_in_off", sensor_valid and "pump_in" not in fault, timedelta(minutes=1)),
+        ("pump_out_off", sensor_valid and "pump_out" not in fault, timedelta(minutes=1)),
+        ("high_trend", sensor_valid, timedelta(minutes=3)),
+        ("mode", sensor_valid, timedelta(0)),
+        ("pump_overrun", not fault.startswith("pump_overrun"), timedelta(minutes=1)),
+        ("no_flow_in", not fault.startswith("no_flow"), timedelta(minutes=1)),
+        ("no_flow_out", not fault.startswith("no_flow"), timedelta(minutes=1)),
     ]
     for code, recovered, stable_for in checks:
         if not recovered:
@@ -89,12 +95,12 @@ def _resolve_alerts_from_sensor(data: dict) -> None:
             """UPDATE alerts
                SET status='RESOLVED', resolved_at=%s, resolved_by='SYSTEM',
                    note=%s, updated_at=%s
-               WHERE alert_code=%s AND status='UNRESOLVED'""",
+               WHERE (LOWER(alert_code)=%s) AND status='UNRESOLVED'""",
             (
                 now,
                 "Hệ thống tự động xác nhận điều kiện cảnh báo đã kết thúc",
                 now,
-                code,
+                code.lower(),
             ),
         )
         if result:
@@ -131,7 +137,9 @@ def _on_connect(client, userdata, flags, rc, props=None):
             _latest["mqtt_connected"] = False
 
 
-def _on_disconnect(client, userdata, rc, props=None, reason=None):
+def _on_disconnect(client, userdata, *args, **kwargs):
+    # Hỗ trợ cả paho v1 và v2 signatures
+    rc = args[0] if args else kwargs.get("reason_code", 0)
     logger.warning(f"[MQTT] Disconnected rc={rc}")
     with _lock:
         _latest["mqtt_connected"] = False
@@ -189,22 +197,14 @@ def _on_message(client, userdata, msg):
             logger.error(f"[DB] sensor_data insert error: {e}")
 
         _resolve_alerts_from_sensor(d)
-
-        # Ghi system_log nhẹ
-        try:
-            db.execute(
-                "INSERT INTO system_logs (log_level,component,event_type,message) VALUES (%s,%s,%s,%s)",
-                ("INFO", "mqtt", "data_received",
-                 f"Nhận dữ liệu ESP32: level={d.get('level',0):.1f}% dist={d.get('dist',0):.1f}cm"),
-            )
-        except Exception:
-            pass
+        # Bỏ ghi log rác data_received mỗi 2s để tránh làm ngập database
 
     # ── /alert ───────────────────────────────────────────────────────────────
     elif topic == f"{P}/alert":
         try:
             d = json.loads(payload)
-            code = str(d.get("code", "UNKNOWN"))
+            # Chuẩn hóa mã cảnh báo sang chữ thường (lowercase) theo thống nhất của nhóm
+            code = str(d.get("code", "unknown")).lower()
             msg_txt = str(d.get("msg", ""))
             sev = _map_severity(code, msg_txt)
             latest = get_latest()
@@ -224,9 +224,30 @@ def _on_message(client, userdata, msg):
     elif topic == f"{P}/ack":
         try:
             is_ok = payload.startswith("ok:")
+            cmd_filter = ""
+            if "mode" in payload:
+                cmd_filter = "AND command='mode'"
+            elif "pump_in" in payload:
+                cmd_filter = "AND command='pump_in'"
+            elif "pump_out" in payload:
+                cmd_filter = "AND command='pump_out'"
+            elif "pump" in payload:
+                cmd_filter = "AND command IN ('pump_in', 'pump_out')"
+            elif "threshold" in payload:
+                cmd_filter = "AND command='threshold'"
+            elif "calib" in payload:
+                cmd_filter = "AND command LIKE 'calib%'"
+            elif "reset" in payload:
+                cmd_filter = "AND command='reset'"
+            elif "restart" in payload:
+                cmd_filter = "AND command='restart'"
+            elif "get" in payload:
+                cmd_filter = "AND command='get'"
+
+            sql = f"""UPDATE control_logs SET acked_at=NOW(3), ack_payload=%s,
+                   status=%s WHERE status='SENT' {cmd_filter} ORDER BY sent_at DESC LIMIT 1"""
             db.execute(
-                """UPDATE control_logs SET acked_at=NOW(3), ack_payload=%s,
-                   status=%s WHERE status='SENT' ORDER BY sent_at DESC LIMIT 1""",
+                sql,
                 (payload[:255], "ACK_OK" if is_ok else "ACK_ERR"),
             )
             db.execute(
@@ -247,6 +268,17 @@ def _on_message(client, userdata, msg):
             )
         except Exception:
             pass
+
+    # ── /cfg ─────────────────────────────────────────────────────────────────
+    elif topic == f"{P}/cfg":
+        try:
+            cfg_obj = json.loads(payload)
+            with _lock:
+                _latest["reported_cfg"] = cfg_obj
+                _latest["cfg_updated_at"] = datetime.now().isoformat()
+            logger.info(f"[MQTT] Đã nhận cấu hình từ ESP32: {payload}")
+        except Exception as e:
+            logger.error(f"[MQTT] Lỗi parse /cfg: {e}")
 
 
 def _extract_esp32_id(d: dict) -> str:
@@ -276,6 +308,8 @@ def publish_command(command: str, payload: str, client_ip: str = "web") -> int:
 
 def start():
     global _client
+    if _client is not None:
+        return
     try:
         _client = mqtt_lib.Client(
             mqtt_lib.CallbackAPIVersion.VERSION2,
@@ -294,12 +328,12 @@ def start():
     # LWT – nếu backend tắt đột ngột
     _client.will_set(f"{P}/backend/status", "offline", retain=True)
 
-    host = os.getenv("MQTT_HOST", "192.168.1.100")
+    host = os.getenv("MQTT_HOST", "127.0.0.1")
     port = int(os.getenv("MQTT_PORT", 1883))
     logger.info(f"[MQTT] Connecting to {host}:{port}")
 
     try:
-        _client.connect(host, port, keepalive=60)
+        _client.connect_async(host, port, keepalive=60)
         _client.loop_start()
     except Exception as e:
         logger.error(f"[MQTT] Cannot connect: {e}")
@@ -308,6 +342,11 @@ def start():
 
 
 def stop():
+    global _client
     if _client:
-        _client.loop_stop()
-        _client.disconnect()
+        try:
+            _client.loop_stop()
+            _client.disconnect()
+        except Exception:
+            pass
+        _client = None
