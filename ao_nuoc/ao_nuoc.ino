@@ -5,7 +5,7 @@
 //  Thu vien can cai (Library Manager): "PubSubClient" (Nick O'Leary)
 //  Board: ESP32 Dev Module
 //
-//  P = "iot-ao-demo-123"; 
+//  P = "iot"; 
 //  Topic (P = tien to):
 //    ESP32 -> broker : P/data   (JSON, moi 2s hoac khi co thay doi)
 //                      P/status (online/offline, retained, LWT)
@@ -29,13 +29,13 @@
 #include <esp_task_wdt.h>
 
 // ===================== CAU HINH MANG =====================
-const char* WIFI_SSID = "TEN_WIFI";
-const char* WIFI_PASS = "MAT_KHAU";
-const char* MQTT_HOST = "192.168.1.100";   // IP may chay Mosquitto (cung mang Wi-Fi)
-const uint16_t MQTT_PORT = 1883;
-const char* MQTT_USER = "esp32";
-const char* MQTT_PASS = "esp32pass";       // trung voi tai khoan tren Mosquitto
-const char* P = "iot";         // tien to topic
+// const char* WIFI_SSID = "TEN_WIFI";
+// const char* WIFI_PASS = "MAT_KHAU";
+// const char* MQTT_HOST = "192.168.1.100";   // IP may chay Mosquitto (cung mang Wi-Fi)
+// const uint16_t MQTT_PORT = 1883;
+// const char* MQTT_USER = "esp32";
+// const char* MQTT_PASS = "esp32pass";       // trung voi tai khoan tren Mosquitto
+// const char* P = "iot";         // tien to topic
 
 // ===================== CHAN KET NOI =====================
 #define TRIG_PIN       26
@@ -47,14 +47,14 @@ const uint8_t RELAY_ON  = LOW;             // relay kich muc thap; doi thanh HIG
 const uint8_t RELAY_OFF = (RELAY_ON == LOW) ? HIGH : LOW;
 
 // ===================== THAM SO MAC DINH (luu duoc vao flash) =====================
-const float DEF_D_EMPTY = 15;           // cm: khoang cach cam bien -> mat nuoc khi ao can (0%)
-const float DEF_D_FULL  = 9;            // cm: khi ao day (100%)
-const float DEF_IN_ON   = 30, DEF_IN_OFF  = 50;   // % : bom vao bat < 30, tat >= 50
+const float DEF_D_EMPTY = 18;           // cm: khoang cach cam bien -> mat nuoc khi ao can (0%)
+const float DEF_D_FULL  = 5;            // cm: khi ao day (100%)
+const float DEF_IN_ON   = 30, DEF_IN_OFF  = 70;   // % : bom vao bat < 30, tat >= 50
 const float DEF_OUT_ON  = 90, DEF_OUT_OFF = 80;   // % : bom ra bat > 90, tat <= 80
 
 // ===================== THAM SO AN TOAN =====================
-const float LIMIT_HIGH = 95.0;             // % : >= khong bom vao (chong tran)
-const float LIMIT_LOW  = 5.0;              // % : <= khong bom ra (chong chay can)                                   (CHECK)
+const float LIMIT_HIGH = 97.0;             // % : >= khong bom vao (chong tran)
+const float LIMIT_LOW  = 0.0;              // % : <= khong bom ra (chong chay can)                                   (CHECK)
 const unsigned long MAX_RUN_MS      = 20UL * 60UL * 1000UL;  // bom chay lien tuc toi da 
 const unsigned long SWITCH_DELAY_MS = 3000UL;                // nghi giua 2 bom khi doi chieu
 const unsigned long MIN_REST_MS     = 3000UL;               // nghi toi thieu truoc khi bat lai
@@ -124,14 +124,27 @@ void edgeAlert(bool& flag, bool cond, const char* code, const char* msg) {
 }
 
 // ===================== LUU / DOC CAU HINH =====================
-void loadCfg() {
-  prefs.begin("ao", false);
-  cfg.dEmpty = prefs.getFloat("dEmpty", DEF_D_EMPTY);
-  cfg.dFull  = prefs.getFloat("dFull",  DEF_D_FULL);
-  cfg.inOn   = prefs.getFloat("inOn",   DEF_IN_ON);
-  cfg.inOff  = prefs.getFloat("inOff",  DEF_IN_OFF);
-  cfg.outOn  = prefs.getFloat("outOn",  DEF_OUT_ON);
-  cfg.outOff = prefs.getFloat("outOff", DEF_OUT_OFF);
+bool thresholdValid(float a, float b, float c, float d) {
+  // inOn < inOff < outOff < outOn, nam trong 0..100
+  return isfinite(a) &&
+         isfinite(b) &&
+         isfinite(c) &&
+         isfinite(d) &&
+         a >= LIMIT_LOW && a <= LIMIT_HIGH &&
+         b >= LIMIT_LOW && b <= LIMIT_HIGH &&
+         c >= LIMIT_LOW && c <= LIMIT_HIGH &&
+         d >= LIMIT_LOW && d <= LIMIT_HIGH &&
+         a < b && b < d && d < c;
+}
+
+bool calibrationValid(float empty, float full) {
+  return isfinite(empty) &&
+         isfinite(full) &&
+         empty >= 2 &&
+         empty <= 400 &&
+         full >= 2 &&
+         full <= 400 &&
+         empty - full >= 5;
 }
 
 void saveCfg() {
@@ -143,6 +156,33 @@ void saveCfg() {
   prefs.putFloat("outOff", cfg.outOff);
 }
 
+void loadCfg() {
+  prefs.begin("ao", false);
+  cfg.dEmpty = prefs.getFloat("dEmpty", DEF_D_EMPTY);
+  cfg.dFull  = prefs.getFloat("dFull", DEF_D_FULL);
+  cfg.inOn   = prefs.getFloat("inOn", DEF_IN_ON);
+  cfg.inOff  = prefs.getFloat("inOff", DEF_IN_OFF);
+  cfg.outOn  = prefs.getFloat("outOn", DEF_OUT_ON);
+  cfg.outOff = prefs.getFloat("outOff", DEF_OUT_OFF);
+
+  bool validCalib = calibrationValid(cfg.dEmpty, cfg.dFull);
+
+  bool validThreshold = thresholdValid(cfg.inOn, cfg.inOff, cfg.outOn, cfg.outOff);
+
+  if (!validCalib || !validThreshold) {
+    cfg.dEmpty = DEF_D_EMPTY;
+    cfg.dFull = DEF_D_FULL;
+    cfg.inOn = DEF_IN_ON;
+    cfg.inOff = DEF_IN_OFF;
+    cfg.outOn = DEF_OUT_ON;
+    cfg.outOff = DEF_OUT_OFF;
+
+    saveCfg();
+
+    Serial.println("[CONFIG] Invalid config, restored defaults");
+  }
+}
+
 void publishCfg() {
   char b[220];
   snprintf(b, sizeof(b),
@@ -151,11 +191,6 @@ void publishCfg() {
     cfg.dEmpty, cfg.dFull, cfg.inOn, cfg.inOff, cfg.outOn, cfg.outOff,
     MAX_RUN_MS / 60000UL, LIMIT_HIGH, LIMIT_LOW);
   pub("cfg", b, true);
-}
-
-bool thresholdValid(float a, float b, float c, float d) {
-  // inOn < inOff < outOff < outOn, nam trong 0..100
-  return a >= 0 && d <= 100 && c <= 100 && a < b && b < d && d < c;
 }
 
 // ===================== DO KHOANG CACH =====================
@@ -256,6 +291,34 @@ void setFault(const char* code, const char* msg) {
 // ===================== XU LY LENH TU WEB =====================
 bool isOn(const String& m) { return m == "ON" || m == "1" || m == "on"; }
 
+bool parseFloatStrict(const char* s, float& value) {
+  if (s == nullptr || *s == '\0') return false;
+  char* end;
+  value = strtof(s, &end);
+  if (end == s || !isfinite(value)) return false;
+  while (*end == ' ' || *end == '\t') end++;
+  return *end == '\0';
+}
+
+bool parseFloatList(const String& input, float* values, int count) {
+  const char* p = input.c_str();
+  for (int i = 0; i < count; i++) {
+    while (*p == ' ' || *p == '\t') p++;
+    char* end;
+    values[i] = strtof(p, &end);
+    if (end == p || !isfinite(values[i])) return false;
+    p = end;
+    while (*p == ' ' || *p == '\t') p++;
+    if (i < count - 1) {
+      if (*p != ',') return false;
+      p++;
+    } else {
+      if (*p != '\0') return false;
+    }
+  }
+  return true;
+}
+
 void onMsg(char* t, byte* b, unsigned int n) {
   String m; m.reserve(n);
   for (unsigned int i = 0; i < n; i++) m += (char)b[i];
@@ -283,26 +346,93 @@ void onMsg(char* t, byte* b, unsigned int n) {
     }
     dirty = true;
   }
-  else if (s.endsWith("/cmd/threshold")) {          // chinh nguong bat/tat
-    float a, b2, c, d;
-    if (sscanf(m.c_str(), "%f,%f,%f,%f", &a, &b2, &c, &d) == 4 && thresholdValid(a, b2, c, d)) {
-      cfg.inOn = a; cfg.inOff = b2; cfg.outOn = c; cfg.outOff = d;
-      saveCfg(); publishCfg(); ack("ok:threshold");
-    } else ack("err:threshold (can inOn<inOff<outOff<outOn, 0..100)");
+  // else if (s.endsWith("/cmd/threshold")) {          // chinh nguong bat/tat
+  //   float a, b2, c, d;
+  //   if (sscanf(m.c_str(), "%f,%f,%f,%f", &a, &b2, &c, &d) == 4 && thresholdValid(a, b2, c, d)) {
+  //     cfg.inOn = a; cfg.inOff = b2; cfg.outOn = c; cfg.outOff = d;
+  //     saveCfg(); publishCfg(); ack("ok:threshold");
+  //   } else ack("err:threshold (can inOn<inOff<outOff<outOn, 0..100)");
+  // }
+  else if (s.endsWith("/cmd/threshold")) {
+    float values[4];
+    if (!parseFloatList(m, values, 4)) {
+      ack("err:threshold_format");
+      return;
+    }
+    float a = values[0];
+    float b2 = values[1];
+    float c = values[2];
+    float d = values[3];
+    if (!thresholdValid(a, b2, c, d)) {
+      ack("err:threshold_range");
+      return;
+    }
+    cfg.inOn = a;
+    cfg.inOff = b2;
+    cfg.outOn = c;
+    cfg.outOff = d;
+    saveCfg();
+    publishCfg();
+    ack("ok:threshold");
   }
-  else if (s.endsWith("/cmd/calib_empty") || s.endsWith("/cmd/calib_full")) {        // chinh muc can/day
+  // else if (s.endsWith("/cmd/calib_empty") || s.endsWith("/cmd/calib_full")) {        // chinh muc can/day
+  //   bool isEmpty = s.endsWith("/cmd/calib_empty");
+  //   float v = m.length() ? m.toFloat() : dist;
+  //   if (v < 2 || v > 400 || (!m.length() && (!haveLevel || sensorErr))) { ack("err:calib"); return; }
+  //   float e = isEmpty ? v : cfg.dEmpty, f = isEmpty ? cfg.dFull : v;
+  //   if (e - f < 5) { ack("err:calib (dEmpty phai > dFull it nhat 5cm)"); return; }
+  //   cfg.dEmpty = e; cfg.dFull = f; saveCfg(); publishCfg(); ack("ok:calib");
+  // }
+  else if (s.endsWith("/cmd/calib_empty") || s.endsWith("/cmd/calib_full")) {
     bool isEmpty = s.endsWith("/cmd/calib_empty");
-    float v = m.length() ? m.toFloat() : dist;
-    if (v < 2 || v > 400 || (!m.length() && (!haveLevel || sensorErr))) { ack("err:calib"); return; }
-    float e = isEmpty ? v : cfg.dEmpty, f = isEmpty ? cfg.dFull : v;
-    if (e - f < 5) { ack("err:calib (dEmpty phai > dFull it nhat 5cm)"); return; }
-    cfg.dEmpty = e; cfg.dFull = f; saveCfg(); publishCfg(); ack("ok:calib");
+    float v;
+    if (m.length() == 0) {
+      if (!haveLevel || sensorErr || goodCount < SENSOR_OK_COUNT) {
+        ack("rejected:sensor_not_ready");
+        return;
+      }
+      v = dist;
+    } else {
+      if (!parseFloatStrict(m.c_str(), v)) {
+        ack("err:calib_format");
+        return;
+      }
+    }
+    float e = isEmpty ? v : cfg.dEmpty;
+    float f = isEmpty ? cfg.dFull : v;
+    if (!calibrationValid(e, f)) {
+      ack("err:calib_range");
+      return;
+    }
+    cfg.dEmpty = e;
+    cfg.dFull = f;
+    saveCfg();
+    publishCfg();
+    ack("ok:calib");
   }
-  else if (s.endsWith("/cmd/calib")) {             // chinh khoang cach can/day
-    float e, f;
-    if (sscanf(m.c_str(), "%f,%f", &e, &f) == 2 && f >= 2 && e <= 400 && e - f >= 5) {
-      cfg.dEmpty = e; cfg.dFull = f; saveCfg(); publishCfg(); ack("ok:calib");
-    } else ack("err:calib");
+  // else if (s.endsWith("/cmd/calib")) {             // chinh khoang cach can/day
+  //   float e, f;
+  //   if (sscanf(m.c_str(), "%f,%f", &e, &f) == 2 && f >= 2 && e <= 400 && e - f >= 5) {
+  //     cfg.dEmpty = e; cfg.dFull = f; saveCfg(); publishCfg(); ack("ok:calib");
+  //   } else ack("err:calib");
+  // }
+  else if (s.endsWith("/cmd/calib")) {
+    float values[2];
+    if (!parseFloatList(m, values, 2)) {
+      ack("err:calib_format");
+      return;
+    }
+    float e = values[0];
+    float f = values[1];
+    if (!calibrationValid(e, f)) {
+      ack("err:calib_range");
+      return;
+    }
+    cfg.dEmpty = e;
+    cfg.dFull = f;
+    saveCfg();
+    publishCfg();
+    ack("ok:calib");
   }
   else if (s.endsWith("/cmd/reset")) {             // xoa loi chot va co canh bao co kiem tra an toan
     stopAll(); // 1. Luon ngat hai bom ve trang thai OFF trong luc reset
