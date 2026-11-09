@@ -32,6 +32,8 @@ app.register_blueprint(chat_bp)
 from notifications.notify_api import notify_bp
 app.register_blueprint(notify_bp)
 
+from water_analysis import build_dashboard_insights
+
 FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend")
 
 # ── Hàm khởi động MQTT ────────────────────────────────────────────────────────
@@ -57,6 +59,20 @@ def index():
 @app.route("/<path:filename>")
 def static_files(filename):
     return send_from_directory(FRONTEND_DIR, filename)
+
+
+# ============================================================================
+#  API: /api/dashboard/insights  – Phân tích xu hướng & Dự báo mực nước (v2)
+# ============================================================================
+@app.route("/api/dashboard/insights")
+def api_dashboard_insights():
+    try:
+        demo = request.args.get("demo", "0") == "1" or os.getenv("DEMO_INSIGHTS", "false").lower() == "true"
+        data = build_dashboard_insights(demo_mode=demo)
+        return jsonify(data)
+    except Exception as e:
+        logger.error(f"[Insights Error] {e}", exc_info=True)
+        return jsonify({"ok": False, "error": "INTERNAL_ERROR"}), 500
 
 
 # ============================================================================

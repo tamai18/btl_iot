@@ -42,7 +42,7 @@ function onPageLoad(page) {
   switch (page) {
     case 'tong-quan':  loadOverview(); break;
     case 'dieu-khien': loadControlPage(); break;
-    case 'cau-hinh':   loadConfig(); break;
+    case 'cau-hinh':   loadConfig(); loadPumpTimeline(); break;
     case 'canh-bao':   loadAlerts(); break;
     case 'lich-su':    loadHistory(); break;
     case 'tro-ly-ai':  if (window.loadChatPage) window.loadChatPage(); break;
@@ -223,6 +223,7 @@ async function loadOverview() {
       safeAPI.sensor({ minutes: 30 }),
     ]);
     loadChart(currentChartPeriod);
+    loadDashboardInsights();
 
     const rec = getLatestRecord(status);
     const cfg = status.config || {};
@@ -392,7 +393,12 @@ function renderOverviewAlerts(alerts) {
   const el = document.getElementById('ov-alerts');
   if (!el) return;
   if (!alerts.length) {
-    el.innerHTML = '<div class="empty-state"><div class="empty-icon">✅</div><div class="empty-text">Không có cảnh báo mới</div></div>';
+    el.innerHTML = `
+      <div style="padding: 22px 0; text-align: center;">
+        <div style="width: 44px; height: 44px; background: #22c55e; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 10px; color: #fff; font-size: 22px; font-weight: bold;">✓</div>
+        <div style="font-size: 13px; color: #64748b;">Không có cảnh báo mới</div>
+      </div>
+    `;
     return;
   }
   const icons = { DANGER:'🚨', WARNING:'⚠️', INFO:'ℹ️' };
@@ -811,10 +817,10 @@ function formatChartRangeTimestamp(timestamp) {
     + ` ${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()}`;
 }
 
-function renderPumpTimeline(records, config) {
-  const inTrack  = document.getElementById('track-pump-in');
-  const outTrack = document.getElementById('track-pump-out');
-  const axis     = document.getElementById('track-axis');
+function renderPumpTimeline(records, config, ids = {}) {
+  const inTrack  = document.getElementById(ids.in || 'track-pump-in');
+  const outTrack = document.getElementById(ids.out || 'track-pump-out');
+  const axis     = document.getElementById(ids.axis || 'track-axis');
   if (!inTrack || !outTrack) return;
 
   inTrack.innerHTML = '';
@@ -1047,33 +1053,28 @@ function updateChartStats(records) {
     setText('chart-stat-min', '--');
     setText('chart-stat-min-time', '--');
     setText('chart-stat-avg', '--');
-    setText('chart-stat-dist', '--');
     return;
   }
   const validRecords = records.filter(record =>
     Number.isFinite(Number(record.water_level))
-    && Number.isFinite(Number(record.distance_cm))
   );
   if (!validRecords.length) {
     updateChartStats([]);
     return;
   }
   const levels = validRecords.map(r => +r.water_level);
-  const dists  = validRecords.map(r => +r.distance_cm);
 
   let maxLvl = levels[0], minLvl = levels[0];
   let maxIdx = 0, minIdx = 0;
-  let sumLvl = 0, sumDist = 0;
+  let sumLvl = 0;
 
   levels.forEach((l, i) => {
     if (l > maxLvl) { maxLvl = l; maxIdx = i; }
     if (l < minLvl) { minLvl = l; minIdx = i; }
     sumLvl += l;
-    sumDist += (dists[i] || 0);
   });
 
   const avgLvl  = (sumLvl / levels.length).toFixed(1);
-  const avgDist = (sumDist / levels.length).toFixed(1);
   const maxTime = validRecords[maxIdx]?.recorded_at
     ? formatChartTimestamp(validRecords[maxIdx].recorded_at).slice(11, 19)
     : '--';
@@ -1086,7 +1087,6 @@ function updateChartStats(records) {
   setText('chart-stat-min', `${minLvl.toFixed(1)} %`);
   setText('chart-stat-min-time', minTime === '--' ? '--' : `(${minTime})`);
   setText('chart-stat-avg', `${avgLvl} %`);
-  setText('chart-stat-dist', `${avgDist} cm`);
 }
 
 function generateMockChartSeries(period) {
@@ -1120,7 +1120,38 @@ function changeChartPeriod(period, btn) {
   loadChart(period);
 }
 
-function updateChartPeriodInfo(period, range = null) {
+function changePumpChartPeriod(period, btn) {
+  document.querySelectorAll('#pump-chart-period-tabs .period-pill').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  loadPumpTimeline(period);
+}
+
+async function loadPumpTimeline(period = '30m') {
+  const config = chartPeriodConfig[period] || chartPeriodConfig['30m'];
+  try {
+    const response = await safeAPI.sensor({
+      minutes: config.minutes,
+      limit: 2000,
+      latest: 1,
+    });
+    if (currentPage !== 'cau-hinh') return;
+
+    const records = response.data || [];
+    renderPumpTimeline(records, config, {
+      in: 'config-track-pump-in',
+      out: 'config-track-pump-out',
+      axis: 'config-track-axis',
+    });
+    updateChartPeriodInfo(period, {
+      start: new Date(Date.now() - config.minutes * 60 * 1000).toISOString(),
+      end: new Date().toISOString(),
+    }, 'pump-chart-period-info');
+  } catch (e) {
+    console.error('loadPumpTimeline error:', e);
+  }
+}
+
+function updateChartPeriodInfo(period, range = null, infoId = 'chart-period-info') {
   const periodInfo = {
     '30m': { range: '30 phút gần nhất', interval: '5 giây' },
     '1h': { range: '1 giờ gần nhất', interval: '10 giây' },
@@ -1129,7 +1160,7 @@ function updateChartPeriodInfo(period, range = null) {
     '30d': { range: '30 ngày gần nhất', interval: '5 ngày' },
   };
   const selected = periodInfo[period] || periodInfo['30m'];
-  const info = document.getElementById('chart-period-info');
+  const info = document.getElementById(infoId);
   if (!info) return;
   const rangeText = range?.start && range?.end
     ? ` · ${formatChartRangeTimestamp(range.start)} → ${formatChartRangeTimestamp(range.end)}`
@@ -1431,39 +1462,6 @@ async function loadConfig(showToast = false) {
     setVal('cfg-mqtt-broker',runtimeConfig.mqtt_broker || cfg.mqtt_broker || '192.168.1.100');
     setVal('cfg-mqtt-port',  runtimeConfig.mqtt_port   || cfg.mqtt_port   || 1883);
     setVal('cfg-topic-prefix',runtimeConfig.topic_prefix || cfg.topic_prefix || 'iot');
-
-    // Config table: hiển thị cấu hình từ ESP32 nếu có phản hồi, kết hợp cấu hình đã lưu
-    const tbody = document.getElementById('cfg-table-body');
-    if (tbody) {
-      const desc = {
-        d_empty:'Khoảng cách khi ao cạn (cm)', d_full:'Khoảng cách khi ao đầy (cm)',
-        in_on_pct:'Ngưỡng bật bơm cấp (%)', in_off_pct:'Ngưỡng tắt bơm cấp (%)',
-        out_on_pct:'Ngưỡng bật bơm thoát (%)', out_off_pct:'Ngưỡng tắt bơm thoát (%)',
-        limit_high:'Ngưỡng cảnh báo cao (%)', limit_low:'Ngưỡng cảnh báo thấp (%)',
-        max_run_min:'Bơm chạy tối đa (phút)', publish_sec:'Chu kỳ MQTT (giây)',
-        mqtt_broker:'MQTT Broker IP', mqtt_port:'MQTT Port',
-        topic_prefix:'Topic Prefix', web_version:'Phiên bản',
-      };
-
-      const reported = data.esp32_reported || null;
-      const hiddenConfigKeys = new Set(['alert_led', 'alert_buzzer']);
-      let rowsHtml = Object.entries(cfg)
-        .filter(([k]) => !hiddenConfigKeys.has(k))
-        .map(([k,v]) => {
-          let espVal = '';
-          if (reported) {
-            if (k === 'in_on_pct' && reported.inOn != null) espVal = ` <span class="badge badge-info" title="ESP32 phản hồi">ESP32: ${reported.inOn}%</span>`;
-            else if (k === 'in_off_pct' && reported.inOff != null) espVal = ` <span class="badge badge-info" title="ESP32 phản hồi">ESP32: ${reported.inOff}%</span>`;
-            else if (k === 'out_on_pct' && reported.outOn != null) espVal = ` <span class="badge badge-info" title="ESP32 phản hồi">ESP32: ${reported.outOn}%</span>`;
-            else if (k === 'out_off_pct' && reported.outOff != null) espVal = ` <span class="badge badge-info" title="ESP32 phản hồi">ESP32: ${reported.outOff}%</span>`;
-            else if (k === 'd_empty' && reported.dEmpty != null) espVal = ` <span class="badge badge-info" title="ESP32 phản hồi">ESP32: ${reported.dEmpty}cm</span>`;
-            else if (k === 'd_full' && reported.dFull != null) espVal = ` <span class="badge badge-info" title="ESP32 phản hồi">ESP32: ${reported.dFull}cm</span>`;
-          }
-          return `<tr><td><code>${escapeHtml(k)}</code></td><td><strong>${escapeHtml(v)}</strong>${espVal}</td><td style="color:var(--text-secondary);font-size:12px">${desc[k]||''}</td></tr>`;
-        }).join('');
-
-      tbody.innerHTML = rowsHtml;
-    }
 
     // Tải cấu hình cảnh báo email & danh sách người nhận
     loadEmailAlertWidget();
@@ -2074,6 +2072,218 @@ async function deleteEmailRecipient(id) {
   }
 }
 
+// ── Insights & Predictions (v2: Hồi quy tuyến tính cuốn chiếu 5 phút) ─────────
+let lastInsightStatus = 'NORMAL';
+let pendingInsightStatus = null;
+let pendingInsightCount = 0;
+let insightsAbortCtrl = null;
+let insightsRefreshTimer = null;
+
+async function loadDashboardInsights() {
+  if (insightsAbortCtrl) {
+    try { insightsAbortCtrl.abort(); } catch (_) {}
+  }
+  insightsAbortCtrl = new AbortController();
+
+  try {
+    const isDemo = isDemoMode();
+    const data = await safeAPI.insights(isDemo);
+    if (!data || !data.ok) {
+      handleInsightsError();
+      return;
+    }
+
+    // 1. Chống nhấp nháy trạng thái (Anti-flicker logic)
+    const newStatus = data.status || 'NORMAL';
+    if (newStatus === 'DANGER' || newStatus === 'UNKNOWN') {
+      lastInsightStatus = newStatus;
+      pendingInsightStatus = null;
+      pendingInsightCount = 0;
+    } else {
+      if (newStatus === lastInsightStatus) {
+        pendingInsightStatus = null;
+        pendingInsightCount = 0;
+      } else {
+        if (pendingInsightStatus === newStatus) {
+          pendingInsightCount++;
+          if (pendingInsightCount >= 2) {
+            lastInsightStatus = newStatus;
+            pendingInsightStatus = null;
+            pendingInsightCount = 0;
+          }
+        } else {
+          pendingInsightStatus = newStatus;
+          pendingInsightCount = 1;
+        }
+      }
+    }
+
+    // 2. Cập nhật Thẻ 1: Nhận định & khuyến nghị
+    const boxEl = document.getElementById('insight-status-box');
+    const iconEl = document.getElementById('insight-status-icon');
+    const titleEl = document.getElementById('insight-status-title');
+    const descEl = document.getElementById('insight-status-desc');
+    const recomEl = document.getElementById('insight-recom-text');
+    const timeEl = document.getElementById('insight-updated-time');
+
+    if (boxEl) {
+      boxEl.className = `insight-status-box ${lastInsightStatus.toLowerCase()}`;
+    }
+    if (iconEl) {
+      if (lastInsightStatus === 'NORMAL') {
+        iconEl.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+      } else if (lastInsightStatus === 'WARNING') {
+        iconEl.textContent = '!';
+      } else if (lastInsightStatus === 'DANGER') {
+        iconEl.textContent = '!';
+      } else {
+        iconEl.textContent = '?';
+      }
+    }
+
+    const ins = data.insight || {};
+    if (titleEl) titleEl.textContent = ins.title || 'Tình hình ao nuôi';
+    if (descEl) descEl.textContent = ins.description || '';
+    if (recomEl) recomEl.textContent = ins.recommendation || 'Tiếp tục theo dõi, chưa cần can thiệp.';
+
+    if (timeEl) {
+      const d = data.updated_at ? new Date(data.updated_at) : new Date();
+      const pad = (n) => String(n).padStart(2, '0');
+      timeEl.textContent = `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    }
+
+    // 3. Cập nhật Thẻ 2: Kết quả dự báo
+    const preds = data.prediction || {};
+    function updatePredRow(tKey, valId, errId) {
+      const p = preds[tKey];
+      const valEl = document.getElementById(valId);
+      const errEl = document.getElementById(errId);
+      if (!valEl) return;
+
+      if (!p || p.state !== 'OK' || p.value === null) {
+        let msg = 'Không thể dự báo';
+        if (p && p.state === 'OUT_OF_RANGE') msg = 'Ngoài giới hạn (0-100%)';
+        else if (data.trend && data.trend.state === 'INSUFFICIENT_DATA') msg = 'Chưa đủ dữ liệu';
+        else if (data.trend && data.trend.state === 'STABILIZING') msg = 'Đang chờ ổn định';
+        
+        valEl.textContent = msg;
+        valEl.style.fontSize = '12px';
+        valEl.style.fontWeight = '500';
+        valEl.style.color = '#94a3b8';
+        if (errEl) errEl.textContent = '';
+      } else {
+        valEl.textContent = `${Number(p.value).toFixed(1)} %`;
+        valEl.style.fontSize = '14px';
+        valEl.style.fontWeight = '700';
+        valEl.style.color = '#0f172a';
+        if (errEl) {
+          const errVal = p.error_margin !== undefined ? p.error_margin : (tKey === '10' ? 0.4 : (tKey === '20' ? 0.8 : 1.3));
+          errEl.textContent = `(± ${Number(errVal).toFixed(1)} %)`;
+        }
+      }
+    }
+
+    updatePredRow('10', 'forecast-10m', 'forecast-10m-err');
+    updatePredRow('20', 'forecast-20m', 'forecast-20m-err');
+    updatePredRow('30', 'forecast-30m', 'forecast-30m-err');
+
+    const isLow = data.trend && data.trend.confidence === 'LOW';
+    document.querySelectorAll('.forecast-pill-row').forEach(el => {
+      el.classList.toggle('low-confidence', isLow);
+    });
+
+    // 4. Cập nhật ETA (Hiển thị thân thiện, dễ hiểu cho người nuôi trồng)
+    const etaHigh = (data.eta && data.eta.high) || {};
+    const etaLow = (data.eta && data.eta.low) || {};
+    renderEtaValue('eta-high-val', etaHigh, 'high');
+    renderEtaValue('eta-low-val', etaLow, 'low');
+
+  } catch (err) {
+    if (err.name === 'AbortError') return;
+    console.warn('[Insights UI Error]', err);
+    handleInsightsError();
+  }
+}
+
+function renderEtaValue(elId, etaObj, type) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  
+  const isHigh = type === 'high';
+  const limitAction = isHigh ? 'tràn' : 'cạn';
+  const limitPct = isHigh ? 95 : 5;
+  
+  if (!etaObj || etaObj.state === 'UNAVAILABLE') {
+    el.innerHTML = '<div class="eta-main" style="color:#64748b;">Đang theo dõi</div><div class="eta-sub">(chờ thêm dữ liệu)</div>';
+    return;
+  }
+  
+  const state = etaObj.state;
+  const raw = String(etaObj.formatted || '').trim();
+  const mins = etaObj.minutes;
+  
+  // 1. Đã chạm hoặc vượt ngưỡng
+  if (state === 'REACHED' || raw.includes('Đã chạm')) {
+    el.innerHTML = `<div class="eta-main" style="color:#dc2626; font-weight:700;">Đã chạm ngưỡng!</div><div class="eta-sub" style="color:#dc2626;">(mực nước ${isHigh ? '≥' : '≤'} ${limitPct}%)</div>`;
+    return;
+  }
+  
+  // 2. An toàn / Chưa có nguy cơ trong 24 giờ
+  if (state === 'NOT_EXPECTED' || (state === 'BEYOND_HORIZON' && (mins === null || mins > 1440)) || raw.includes('Không dự kiến') || raw.includes('An toàn')) {
+    el.innerHTML = `<div class="eta-main text-success">An toàn</div><div class="eta-sub">(chưa lo ${limitAction}, > 24 giờ)</div>`;
+    return;
+  }
+  
+  // 3. Có thời gian dự kiến cụ thể (mins <= 1440)
+  let timeStr = raw;
+  if (!timeStr.endsWith('nữa') && !timeStr.includes('Không') && !timeStr.includes('An toàn')) {
+    timeStr = timeStr + ' nữa';
+  }
+  
+  if (mins !== null && mins !== undefined) {
+    if (mins <= 30) {
+      // Báo động đỏ: dưới 30 phút
+      el.innerHTML = `<div class="eta-main" style="color:#dc2626; font-weight:700;">⚠️ ${escapeHtml(timeStr)}</div><div class="eta-sub" style="color:#b91c1c; font-weight:600;">(sắp ${limitAction}, cần xử lý ngay)</div>`;
+      return;
+    } else if (mins <= 120) {
+      // Cảnh báo vàng: trong vòng 2 giờ
+      el.innerHTML = `<div class="eta-main" style="color:#d97706; font-weight:700;">⏱️ ${escapeHtml(timeStr)}</div><div class="eta-sub" style="color:#b45309;">(chú ý ${isHigh ? 'xả bớt' : 'cấp thêm'})</div>`;
+      return;
+    }
+  }
+  
+  // Dự kiến bình thường (trên 2 giờ và trong vòng 24 giờ)
+  el.innerHTML = `<div class="eta-main" style="color:#0f172a; font-weight:700;">${escapeHtml(timeStr)}</div><div class="eta-sub" style="color:#64748b;">(nếu tiếp tục ${isHigh ? 'tăng' : 'giảm'})</div>`;
+}
+
+function handleInsightsError() {
+  const titleEl = document.getElementById('insight-status-title');
+  const descEl = document.getElementById('insight-status-desc');
+  const boxEl = document.getElementById('insight-status-box');
+  const iconEl = document.getElementById('insight-status-icon');
+  if (boxEl) boxEl.className = 'insight-status-box unknown';
+  if (iconEl) iconEl.textContent = '?';
+  if (titleEl) titleEl.textContent = 'Tình hình hiện tại: Không thể cập nhật';
+  if (descEl) descEl.textContent = 'Không thể kết nối đến máy chủ phân tích dữ liệu.';
+  
+  ['forecast-10m', 'forecast-20m', 'forecast-30m'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.textContent = 'Không thể cập nhật';
+      el.style.fontSize = '12px';
+      el.style.color = '#94a3b8';
+    }
+  });
+  ['forecast-10m-err', 'forecast-20m-err', 'forecast-30m-err'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = '';
+  });
+  const etaHighEl = document.getElementById('eta-high-val');
+  const etaLowEl = document.getElementById('eta-low-val');
+  if (etaHighEl) etaHighEl.innerHTML = '<div class="eta-main" style="color:#94a3b8">Đang theo dõi</div><div class="eta-sub">(chưa có dữ liệu)</div>';
+  if (etaLowEl) etaLowEl.innerHTML = '<div class="eta-main" style="color:#94a3b8">Đang theo dõi</div><div class="eta-sub">(chưa có dữ liệu)</div>';
+}
+
 // ── Auto-refresh ──────────────────────────────────────────────────────────────
 function startAutoRefresh() {
   autoRefreshTimer = setInterval(() => {
@@ -2083,7 +2293,22 @@ function startAutoRefresh() {
       loadControlPage();
     }
   }, 5000);
+
+  // Chu kỳ làm mới dự báo riêng: 30 giây một lần, tạm dừng khi tab bị ẩn
+  if (insightsRefreshTimer) clearInterval(insightsRefreshTimer);
+  insightsRefreshTimer = setInterval(() => {
+    if (currentPage === 'tong-quan' && !document.hidden) {
+      loadDashboardInsights();
+    }
+  }, 30000);
 }
+
+// Lắng nghe sự kiện chuyển đổi hiển thị tab trình duyệt
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && currentPage === 'tong-quan') {
+    loadDashboardInsights();
+  }
+});
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 (function init() {

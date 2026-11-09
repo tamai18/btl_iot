@@ -48,6 +48,7 @@ const api = {
   controlLogs: (p={})  => api.get('/api/control_logs?' + new URLSearchParams(p)),
   config:      ()      => api.get('/api/config'),
   control:     (command, payload) => api.post('/api/control', { command, payload }),
+  insights:    (demo=false) => api.get('/api/dashboard/insights' + (demo ? '?demo=1' : '')),
   saveConfig:  (data)  => api.post('/api/config', data),
 
   // ── Notify Endpoints ───────────────────────────────────────────────────
@@ -178,6 +179,32 @@ const demo = {
       ]
     };
   },
+  insights() {
+    return {
+      ok: true,
+      status: "NORMAL",
+      data_quality: { level: "GOOD", reasons: [], window_seconds_used: 300, bins: 30, last_sample_age_s: 3 },
+      current_level_pct: 40.8,
+      trend: { state: "OK", direction: "INCREASING", strength: "SLOW", slope_pct_per_min: 0.12, slope_cm_per_min: 0.08, confidence: "HIGH", text: "tăng nhẹ" },
+      prediction: {
+        "10": { value: 42.0, state: "OK", error_margin: 0.4 },
+        "20": { value: 43.2, state: "OK", error_margin: 0.8, reference_only: true },
+        "30": { value: 44.4, state: "OK", error_margin: 1.3, reference_only: true }
+      },
+      eta: {
+        high: { minutes: 451, state: "BEYOND_HORIZON", formatted: "≈ 7 giờ 31 phút nữa", limit: 95.0 },
+        low: { minutes: null, state: "NOT_EXPECTED", formatted: "An toàn (> 24 giờ)", limit: 5.0 }
+      },
+      pumps: { pump_in: false, pump_out: false, auto_mode: true },
+      insight: {
+        title: "Tình hình hiện tại: Bình thường (NORMAL)",
+        description: "Mực nước hiện tại là 40.8 %, có xu hướng tăng nhẹ với tốc độ khoảng +0.12%/phút (≈ 0.08 cm/phút). Hai máy bơm đang tắt, thiết bị ESP32 kết nối bình thường và chưa ghi nhận lỗi.",
+        recommendation: "Tiếp tục theo dõi, chưa cần can thiệp."
+      },
+      data_as_of: "2026-11-10T02:05:22+07:00",
+      updated_at: "2026-11-10T02:05:52+07:00"
+    };
+  },
 };
 
 // ── Try real API, fallback to demo only when ?demo=1 or explicitly set ──────
@@ -204,6 +231,7 @@ window.safeAPI = {
   logs:        (p)     => safeCall(api.logs,        demo.logs,   p),
   controlLogs: (p)     => safeCall(api.controlLogs, demo.controlLogs, p),
   config:      ()      => safeCall(api.config,      demo.config),
+  insights:    (demo)  => safeCall(() => api.insights(demo), () => demo.insights()),
   control:     async (c, p) => {
     if (isDemoMode()) return { ok: true, command: c, payload: p, demo: true };
     return await api.control(c, p);
