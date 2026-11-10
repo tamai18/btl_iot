@@ -62,10 +62,6 @@
       </div>
     </div>
     <div class="topbar-right">
-      <div class="status-badge">
-        <div class="status-dot" id="esp32-dot"></div>
-        <span id="esp32-status-text">ESP32 đang kiểm tra...</span>
-      </div>
       <div class="topbar-time">
         <span>🕐</span>
         <span id="clock-display"></span>
@@ -281,29 +277,12 @@
         <span class="card-title">🛡️ Trạng thái hiện tại</span>
       </div>
       <div class="card-body" style="padding-top:4px;">
-        <div class="stat-grid" style="margin-top:0;">
+        <div class="grid-2" style="margin-top:0;">
           <div class="stat-card" style="border:1px solid #eef2f6;">
             <div class="stat-icon blue">🌊</div>
             <div>
               <div class="stat-label">Mực nước hiện tại</div>
               <div class="stat-value text-info" id="ctrl-ov-level">45.5 %</div>
-              <div class="stat-unit" id="ctrl-ov-dist">Khoảng cách: 56.7 cm</div>
-            </div>
-          </div>
-          <div class="stat-card" style="border:1px solid #eef2f6;">
-            <div class="stat-icon green">📟</div>
-            <div>
-              <div class="stat-label">Trạng thái ESP32</div>
-              <div class="stat-value text-success" id="ctrl-ov-esp32">Online</div>
-              <div class="stat-unit" id="ctrl-ov-rssi">RSSI: -55 dBm</div>
-            </div>
-          </div>
-          <div class="stat-card" style="border:1px solid #eef2f6;">
-            <div class="stat-icon blue">📡</div>
-            <div>
-              <div class="stat-label">Kết nối MQTT</div>
-              <div class="stat-value text-success" id="ctrl-ov-mqtt">Đã kết nối</div>
-              <div class="stat-unit">Broker: 1883</div>
             </div>
           </div>
           <div class="stat-card" style="border:1px solid #eef2f6;">
@@ -463,6 +442,10 @@
   <div class="page" id="page-cau-hinh">
     <h1 class="page-title">⚙️ Cấu hình hệ thống</h1>
     <p class="page-sub">Thiết lập các ngưỡng mực nước, hiệu chỉnh cảm biến và tùy chỉnh tham số hoạt động</p>
+    <div class="cfg-info-box">
+      <span id="config-source">Đang tải thông số từ ao_nuoc.ino...</span>
+      <button class="btn btn-outline btn-sm" onclick="loadConfig(true)">↻ Lấy thông số từ file</button>
+    </div>
 
     <div class="grid-2" style="margin-bottom:16px;">
       <!-- Ngưỡng bơm -->
@@ -482,7 +465,7 @@
               </div>
               <div class="cfg-field">
                 <span class="cfg-field-label">Ngưỡng tắt IN (%)</span>
-                <input type="number" class="form-control" id="cfg-in-off" style="width:80px" min="0" max="100" value="50">
+                <input type="number" class="form-control" id="cfg-in-off" style="width:80px" min="0" max="100" value="70">
               </div>
             </div>
             <div class="pump-cfg-card pump-out-card">
@@ -510,12 +493,12 @@
           <div class="cfg-info-box">ℹ️ Thiết lập khoảng cách từ cảm biến đến mặt nước khi ao cạn và ao đầy.</div>
           <div class="form-group">
             <label class="form-label">Khoảng cách khi ao cạn – dEmpty (cm)</label>
-            <input type="number" class="form-control" id="cfg-d-empty" min="5" max="400" step="0.5" value="100">
+            <input type="number" class="form-control" id="cfg-d-empty" min="2" max="400" step="0.5" value="18">
             <div style="font-size:11.5px;color:var(--text-secondary);margin-top:4px">Khoảng cách từ cảm biến đến mặt nước khi mực nước = 0%</div>
           </div>
           <div class="form-group">
             <label class="form-label">Khoảng cách khi ao đầy – dFull (cm)</label>
-            <input type="number" class="form-control" id="cfg-d-full" min="2" max="400" step="0.5" value="10">
+            <input type="number" class="form-control" id="cfg-d-full" min="2" max="400" step="0.5" value="5">
             <div style="font-size:11.5px;color:var(--text-secondary);margin-top:4px">Khoảng cách từ cảm biến đến mặt nước khi mực nước = 100%</div>
           </div>
           <div style="display:flex;gap:8px;">
@@ -534,11 +517,11 @@
         <div class="card-body">
           <div class="form-group">
             <label class="form-label">Ngưỡng mực nước cao – cảnh báo tràn (%)</label>
-            <input type="number" class="form-control" id="cfg-limit-high" min="50" max="100" value="95">
+            <input type="number" class="form-control" id="cfg-limit-high" min="50" max="100" value="97">
           </div>
           <div class="form-group">
             <label class="form-label">Ngưỡng mực nước thấp – cảnh báo cạn (%)</label>
-            <input type="number" class="form-control" id="cfg-limit-low" min="0" max="50" value="5">
+            <input type="number" class="form-control" id="cfg-limit-low" min="0" max="50" value="0">
           </div>
           <div class="form-group">
             <label class="form-label">Thời gian chạy bơm tối đa (phút)</label>

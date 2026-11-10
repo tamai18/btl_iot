@@ -187,14 +187,14 @@ def _setup_sqlite_schema():
 
     # Seed default config
     configs = [
-        ('d_empty', '100', 'Khoảng cách khi cạn (cm)'),
-        ('d_full', '10', 'Khoảng cách khi đầy (cm)'),
+        ('d_empty', '18', 'Khoảng cách khi cạn (cm)'),
+        ('d_full', '5', 'Khoảng cách khi đầy (cm)'),
         ('in_on_pct', '30', 'Ngưỡng bật bơm IN (%)'),
-        ('in_off_pct', '50', 'Ngưỡng tắt bơm IN (%)'),
+        ('in_off_pct', '70', 'Ngưỡng tắt bơm IN (%)'),
         ('out_on_pct', '90', 'Ngưỡng bật bơm OUT (%)'),
         ('out_off_pct', '80', 'Ngưỡng tắt bơm OUT (%)'),
-        ('limit_high', '95', 'Ngưỡng cảnh báo cao (%)'),
-        ('limit_low', '5', 'Ngưỡng cảnh báo thấp (%)'),
+        ('limit_high', '97', 'Ngưỡng cảnh báo cao (%)'),
+        ('limit_low', '0', 'Ngưỡng cảnh báo thấp (%)'),
         ('max_run_min', '20', 'Thời gian bơm chạy tối đa (phút)'),
         ('switch_delay_sec', '3', 'Nghỉ giữa 2 bơm (giây)'),
         ('min_rest_sec', '10', 'Nghỉ tối thiểu trước khi bật lại (giây)'),

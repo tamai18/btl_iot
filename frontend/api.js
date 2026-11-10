@@ -79,12 +79,17 @@ const demo = {
         rssi: -55, uptime_sec: 5280, recorded_at: new Date().toISOString().slice(0,19),
       },
       config: {
-        d_empty:'100', d_full:'10', in_on_pct:'30', in_off_pct:'50',
-        out_on_pct:'90', out_off_pct:'80', limit_high:'95', limit_low:'5',
+        d_empty:'18', d_full:'5', in_on_pct:'30', in_off_pct:'70',
+        out_on_pct:'90', out_off_pct:'80', limit_high:'97', limit_low:'0',
         max_run_min:'20', publish_sec:'2', web_version:'1.0.0',
         mqtt_broker:'192.168.1.100', mqtt_port:'1883',
         topic_prefix:'iot', language:'vi',
 
+      },
+      firmware_defaults: {
+        d_empty:'18', d_full:'5', in_on_pct:'30', in_off_pct:'70',
+        out_on_pct:'90', out_off_pct:'80', limit_high:'97', limit_low:'0',
+        max_run_min:'20', publish_sec:'2',
       },
       total_records: 1245,
     };
@@ -160,11 +165,15 @@ const demo = {
   },
   config() {
     return { ok:true, config:{
-      d_empty:'100', d_full:'10', in_on_pct:'30', in_off_pct:'50',
-      out_on_pct:'90', out_off_pct:'80', limit_high:'95', limit_low:'5',
+      d_empty:'18', d_full:'5', in_on_pct:'30', in_off_pct:'70',
+      out_on_pct:'90', out_off_pct:'80', limit_high:'97', limit_low:'0',
       max_run_min:'20', publish_sec:'2', mqtt_broker:'192.168.1.100',
       mqtt_port:'1883', topic_prefix:'iot',
       web_version:'1.0.0', language:'vi',
+    }, firmware_defaults: {
+      d_empty:'18', d_full:'5', in_on_pct:'30', in_off_pct:'70',
+      out_on_pct:'90', out_off_pct:'80', limit_high:'97', limit_low:'0',
+      max_run_min:'20', publish_sec:'2',
     }};
   },
   controlLogs() {

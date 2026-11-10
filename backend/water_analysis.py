@@ -212,21 +212,21 @@ def get_system_limits():
     cfg = {r["config_key"]: r["config_value"] for r in cfg_rows}
     
     try:
-        limit_high = float(cfg.get("limit_high", 95.0))
+        limit_high = float(cfg.get("limit_high", 97.0))
     except ValueError:
-        limit_high = 95.0
+        limit_high = 97.0
     try:
-        limit_low = float(cfg.get("limit_low", 5.0))
+        limit_low = float(cfg.get("limit_low", 0.0))
     except ValueError:
-        limit_low = 5.0
+        limit_low = 0.0
     try:
-        d_empty = float(cfg.get("d_empty", 100.0))
+        d_empty = float(cfg.get("d_empty", 18.0))
     except ValueError:
-        d_empty = 100.0
+        d_empty = 18.0
     try:
-        d_full = float(cfg.get("d_full", 10.0))
+        d_full = float(cfg.get("d_full", 5.0))
     except ValueError:
-        d_full = 10.0
+        d_full = 5.0
 
     return {
         "limit_high": limit_high,
@@ -614,8 +614,8 @@ def _build_fallback_response(status, trend_state, title, desc, recom, limits, no
             "30": {"value": None, "state": "UNAVAILABLE", "error_margin": 0.0, "reference_only": True}
         },
         "eta": {
-            "high": {"minutes": None, "state": "UNAVAILABLE", "formatted": "Đang theo dõi", "limit": limits.get("limit_high", 95)},
-            "low": {"minutes": None, "state": "UNAVAILABLE", "formatted": "Đang theo dõi", "limit": limits.get("limit_low", 5)}
+            "high": {"minutes": None, "state": "UNAVAILABLE", "formatted": "Đang theo dõi", "limit": limits.get("limit_high", 97)},
+            "low": {"minutes": None, "state": "UNAVAILABLE", "formatted": "Đang theo dõi", "limit": limits.get("limit_low", 0)}
         },
         "pumps": pumps or {"pump_in": False, "pump_out": False, "auto_mode": True},
         "insight": {

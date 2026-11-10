@@ -41,14 +41,14 @@ state = {
     "fault_code": "none",
     "rssi": -55,
     "uptime": 0,
-    "d_empty": 100.0,
-    "d_full": 10.0,
+    "d_empty": 18.0,
+    "d_full": 5.0,
     "in_on": 30.0,
-    "in_off": 50.0,
+    "in_off": 70.0,
     "out_on": 90.0,
     "out_off": 80.0,
-    "limit_high": 95.0,
-    "limit_low": 5.0,
+    "limit_high": 97.0,
+    "limit_low": 0.0,
 }
 
 running = True

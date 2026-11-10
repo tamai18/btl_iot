@@ -505,11 +505,11 @@ def handle_config() -> dict:
     synced = data.get("config_synced", False)
 
     in_on = server_cfg.get("in_on_pct", 30)
-    in_off = server_cfg.get("in_off_pct", 50)
+    in_off = server_cfg.get("in_off_pct", 70)
     out_on = server_cfg.get("out_on_pct", 90)
     out_off = server_cfg.get("out_off_pct", 80)
-    lim_high = server_cfg.get("limit_high", 95)
-    lim_low = server_cfg.get("limit_low", 5)
+    lim_high = server_cfg.get("limit_high", 97)
+    lim_low = server_cfg.get("limit_low", 0)
 
     title = "Cấu hình ngưỡng hoạt động của ao nuôi:"
     sync_str = "Đã đồng bộ với ESP32" if synced else "Chưa đồng bộ hoàn toàn với ESP32"

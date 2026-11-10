@@ -8,6 +8,9 @@ let chartOverview = null, chartMain = null, chartPump = null;
 let alertPage = 1, histPage = 1, ctrlLogPage = 1;
 let autoRefreshTimer = null;
 let configCache = {};
+let configSource = 'firmware';
+let configLoading = false;
+const configFieldValues = {};
 
 // ── Navigation ────────────────────────────────────────────────────────────────
 function navigate(page) {
@@ -256,12 +259,6 @@ async function loadOverview() {
     if (overviewMqtt) {
       overviewMqtt.className = 'stat-value ' + (mqttOk ? 'text-info' : 'text-danger');
     }
-
-    // ESP32 status dot in topbar
-    const dot = document.getElementById('esp32-dot');
-    const txt = document.getElementById('esp32-status-text');
-    dot.className = 'status-dot ' + (isOnline ? '' : 'offline');
-    txt.textContent = isOnline ? 'ESP32 đang hoạt động' : 'ESP32 offline';
 
     // Pump
     setPumpUI('in',  !!rec.pump_in);
@@ -1192,11 +1189,7 @@ async function loadControlPage() {
 
     // 1. Cập nhật 4 thẻ trạng thái trên cùng
     setText('ctrl-ov-level', fmt.pct(rec.water_level != null ? rec.water_level : 45.5));
-    setText('ctrl-ov-dist', `Khoảng cách: ${rec.distance_cm != null ? rec.distance_cm.toFixed(1) : '56.7'} cm`);
     const deviceOnline = status.device_online === true;
-    setText('ctrl-ov-esp32', deviceOnline ? (rec.sensor_err ? 'Error' : 'Online') : 'Offline');
-    setText('ctrl-ov-rssi', `RSSI: ${rec.rssi != null ? rec.rssi : -55} dBm`);
-    setText('ctrl-ov-mqtt', status.mqtt_connected ? 'Đã kết nối' : 'Đã kết nối');
     setText('ctrl-ov-mode', deviceOnline && rec.auto_mode != null
       ? (rec.auto_mode ? 'AUTO' : 'MANUAL')
       : '--');
@@ -1442,30 +1435,53 @@ async function loadControlLogsTable(page = ctrlLogPage) {
 // ══════════════════════════════════════════════════════════════════════════════
 //  PAGE 4: CẤU HÌNH
 // ══════════════════════════════════════════════════════════════════════════════
-async function loadConfig(showToast = false) {
+async function loadConfig(showToast = false, source = 'firmware', background = false) {
+  if (background && configLoading) return;
+  configLoading = true;
+  configSource = source;
+  const setConfigVal = (id, value) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    // Polling must not overwrite an unfinished edit or the focused input.
+    if (background && (el === document.activeElement ||
+        (id in configFieldValues && el.value !== configFieldValues[id]))) return;
+    setVal(id, value);
+    configFieldValues[id] = el.value;
+  };
   try {
     const data = await safeAPI.config();
     const cfg = data.config || {};
+    const defaults = data.firmware_defaults || {};
     const runtimeConfig = data.runtime_config || {};
     configCache = cfg;
+    const reported = data.esp32_reported || {};
+    const value = (key, reportedKey, fallback) =>
+      source === 'esp32'
+        ? reported[reportedKey] ?? defaults[key] ?? cfg[key] ?? fallback
+        : defaults[key] ?? cfg[key] ?? fallback;
 
-    setVal('cfg-in-on',      cfg.in_on_pct   || 30);
-    setVal('cfg-in-off',     cfg.in_off_pct  || 50);
-    setVal('cfg-out-on',     cfg.out_on_pct  || 90);
-    setVal('cfg-out-off',    cfg.out_off_pct || 80);
-    setVal('cfg-d-empty',    cfg.d_empty     || 100);
-    setVal('cfg-d-full',     cfg.d_full      || 10);
-    setVal('cfg-limit-high', cfg.limit_high  || 95);
-    setVal('cfg-limit-low',  cfg.limit_low   || 5);
-    setVal('cfg-max-run',    cfg.max_run_min || 20);
-    setVal('cfg-publish-sec',cfg.publish_sec || 2);
-    setVal('cfg-mqtt-broker',runtimeConfig.mqtt_broker || cfg.mqtt_broker || '192.168.1.100');
-    setVal('cfg-mqtt-port',  runtimeConfig.mqtt_port   || cfg.mqtt_port   || 1883);
-    setVal('cfg-topic-prefix',runtimeConfig.topic_prefix || cfg.topic_prefix || 'iot');
+    setConfigVal('cfg-in-on',      value('in_on_pct', 'inOn', 30));
+    setConfigVal('cfg-in-off',     value('in_off_pct', 'inOff', 70));
+    setConfigVal('cfg-out-on',     value('out_on_pct', 'outOn', 90));
+    setConfigVal('cfg-out-off',    value('out_off_pct', 'outOff', 80));
+    setConfigVal('cfg-d-empty',    value('d_empty', 'dEmpty', 18));
+    setConfigVal('cfg-d-full',     value('d_full', 'dFull', 5));
+    setConfigVal('cfg-limit-high', value('limit_high', 'limitHigh', 97));
+    setConfigVal('cfg-limit-low',  value('limit_low', 'limitLow', 0));
+    setConfigVal('cfg-max-run',    value('max_run_min', 'maxRunMin', 20));
+    setConfigVal('cfg-publish-sec', defaults.publish_sec ?? cfg.publish_sec ?? 2);
+    setConfigVal('cfg-mqtt-broker', defaults.mqtt_broker ?? runtimeConfig.mqtt_broker ?? cfg.mqtt_broker ?? '192.168.1.100');
+    setConfigVal('cfg-mqtt-port', defaults.mqtt_port ?? runtimeConfig.mqtt_port ?? cfg.mqtt_port ?? 1883);
+    setConfigVal('cfg-topic-prefix', defaults.topic_prefix ?? runtimeConfig.topic_prefix ?? cfg.topic_prefix ?? 'iot');
+    setText('config-source', source === 'esp32'
+      ? 'Đang xem cấu hình ESP32 báo về; mục chưa được thiết bị báo về lấy từ file hoặc máy chủ.'
+      : 'Thông số lấy từ ao_nuoc.ino, tự cập nhật mỗi 5 giây sau khi lưu file. Ô đang sửa được giữ nguyên. Các mục chưa khai báo trong file lấy từ máy chủ.');
 
     // Tải cấu hình cảnh báo email & danh sách người nhận
-    loadEmailAlertWidget();
-    loadEmailRecipientsTable();
+    if (!background) {
+      loadEmailAlertWidget();
+      loadEmailRecipientsTable();
+    }
 
     if (showToast) {
       toast('🔄 Đã tải lại cấu hình từ server!', 'info');
@@ -1474,6 +1490,8 @@ async function loadConfig(showToast = false) {
   } catch(e) {
     console.error('loadConfig error:', e);
     if (showToast) toast('❌ Không thể tải cấu hình từ server', 'error');
+  } finally {
+    configLoading = false;
   }
 }
 
@@ -1524,7 +1542,7 @@ async function saveAndSendConfig() {
     } else {
       toast('✅ Đã lưu và ESP32 xác nhận cập nhật cấu hình', 'success');
     }
-    loadConfig();
+    // Keep the submitted values visible; saving to ESP32 does not edit the .ino file.
   } catch (err) {
     toast(`❌ Lỗi kết nối: ${err.message || 'Mất kết nối máy chủ'}`, 'error');
   }
@@ -1888,7 +1906,7 @@ window.sendCmd = async function(command, payload = '1') {
         }, 1200);
       } else if (command === 'get') {
         toast('✅ Đã yêu cầu ESP32 gửi lại cấu hình!', 'success');
-        setTimeout(loadConfig, 1500);
+        setTimeout(() => loadConfig(false, 'esp32'), 1500);
       } else {
         toast(`✅ Lệnh ${command} đã gửi thành công!`, 'success');
       }
@@ -2291,6 +2309,8 @@ function startAutoRefresh() {
       loadOverview();
     } else if (currentPage === 'dieu-khien') {
       loadControlPage();
+    } else if (currentPage === 'cau-hinh' && !document.hidden) {
+      loadConfig(false, configSource, true);
     }
   }, 5000);
 

@@ -67,8 +67,8 @@ def _get_config_thresholds() -> dict:
 
 def _determine_level_state(level: float, cfg: dict) -> str:
     """Xác định trạng thái mực nước dựa trên ngưỡng cấu hình."""
-    limit_high = cfg.get("limit_high", 95)
-    limit_low = cfg.get("limit_low", 5)
+    limit_high = cfg.get("limit_high", 97)
+    limit_low = cfg.get("limit_low", 0)
     in_on = cfg.get("in_on_pct", 30)
     out_on = cfg.get("out_on_pct", 90)
 
@@ -196,11 +196,11 @@ def get_current_status() -> dict:
         "level_state": level_state,
         "config": {
             "in_on_pct": cfg.get("in_on_pct", 30),
-            "in_off_pct": cfg.get("in_off_pct", 50),
+            "in_off_pct": cfg.get("in_off_pct", 70),
             "out_on_pct": cfg.get("out_on_pct", 90),
             "out_off_pct": cfg.get("out_off_pct", 80),
-            "limit_high": cfg.get("limit_high", 95),
-            "limit_low": cfg.get("limit_low", 5),
+            "limit_high": cfg.get("limit_high", 97),
+            "limit_low": cfg.get("limit_low", 0),
         },
     }
 
@@ -253,8 +253,8 @@ def get_level_change(minutes: int = 30) -> dict:
     delta_pct = round(avg_last - avg_first, 2)
 
     # Tính delta_cm dựa trên khoảng cách d_empty - d_full
-    d_empty = cfg.get("d_empty", 100)
-    d_full = cfg.get("d_full", 10)
+    d_empty = cfg.get("d_empty", 18)
+    d_full = cfg.get("d_full", 5)
     range_cm = d_empty - d_full
     delta_cm = round(delta_pct * range_cm / 100, 2) if range_cm > 0 else 0.0
 
@@ -489,13 +489,13 @@ def get_config() -> dict:
 
     server_config = {
         "in_on_pct": cfg.get("in_on_pct", 30),
-        "in_off_pct": cfg.get("in_off_pct", 50),
+        "in_off_pct": cfg.get("in_off_pct", 70),
         "out_on_pct": cfg.get("out_on_pct", 90),
         "out_off_pct": cfg.get("out_off_pct", 80),
-        "limit_high": cfg.get("limit_high", 95),
-        "limit_low": cfg.get("limit_low", 5),
-        "d_empty": cfg.get("d_empty", 100),
-        "d_full": cfg.get("d_full", 10),
+        "limit_high": cfg.get("limit_high", 97),
+        "limit_low": cfg.get("limit_low", 0),
+        "d_empty": cfg.get("d_empty", 18),
+        "d_full": cfg.get("d_full", 5),
         "max_run_min": cfg.get("max_run_min", 20),
         "publish_sec": cfg.get("publish_sec", 2),
     }

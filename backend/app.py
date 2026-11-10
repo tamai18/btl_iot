@@ -13,6 +13,7 @@ load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
 import db
 import mqtt_client
+from firmware_config import load_firmware_defaults
 
 # ── Logging ──────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -400,9 +401,12 @@ def api_config():
         cfg["topic_prefix"] = os.getenv("MQTT_TOPIC_PREFIX", "iot")
         latest = mqtt_client.get_latest()
         resp = {"ok": True, "config": cfg}
+        resp["firmware_defaults"] = load_firmware_defaults()
         if "reported_cfg" in latest:
             resp["esp32_reported"] = latest["reported_cfg"]
-        return jsonify(resp)
+        response = jsonify(resp)
+        response.headers["Cache-Control"] = "no-store"
+        return response
 
     # POST: cập nhật và gửi xuống ESP32
     data = request.get_json(silent=True) or {}
@@ -450,14 +454,14 @@ def api_config():
         rows = db.execute("SELECT config_key,config_value FROM system_config WHERE config_key IN (%s,%s,%s,%s)",
                           ("in_on_pct", "in_off_pct", "out_on_pct", "out_off_pct"), fetch="all")
         cfg = {r["config_key"]: r["config_value"] for r in (rows or [])}
-        thr = f"{cfg.get('in_on_pct',30)},{cfg.get('in_off_pct',50)},{cfg.get('out_on_pct',90)},{cfg.get('out_off_pct',80)}"
+        thr = f"{cfg.get('in_on_pct',30)},{cfg.get('in_off_pct',70)},{cfg.get('out_on_pct',90)},{cfg.get('out_off_pct',80)}"
         mqtt_client.publish_command("threshold", thr, request.remote_addr or "web")
 
     if {"d_empty", "d_full"} & set(updated):
         rows = db.execute("SELECT config_key,config_value FROM system_config WHERE config_key IN (%s,%s)",
                           ("d_empty", "d_full"), fetch="all")
         cfg = {r["config_key"]: r["config_value"] for r in (rows or [])}
-        calib = f"{cfg.get('d_empty',100)},{cfg.get('d_full',10)}"
+        calib = f"{cfg.get('d_empty',18)},{cfg.get('d_full',5)}"
         mqtt_client.publish_command("calib", calib, request.remote_addr or "web")
 
     res_data = {"ok": True, "updated": updated, "mqtt_sent": mqtt_ok}

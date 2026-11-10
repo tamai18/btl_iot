@@ -65,10 +65,10 @@ def check_water_level(status: dict, cfg: dict) -> dict | None:
         return None
 
     try:
-        limit_high = float(cfg.get("limit_high", 95))
-        limit_low = float(cfg.get("limit_low", 5))
+        limit_high = float(cfg.get("limit_high", 97))
+        limit_low = float(cfg.get("limit_low", 0))
     except (TypeError, ValueError):
-        limit_high, limit_low = 95.0, 5.0
+        limit_high, limit_low = 97.0, 0.0
 
     if level >= limit_high:
         return {
@@ -98,8 +98,8 @@ def check_near_limit(status: dict, cfg: dict, recent_history: list | None = None
         level = float(status.get("water_level", -1))
         if level < 0:
             return None
-        limit_high = float(cfg.get("limit_high", 95))
-        limit_low = float(cfg.get("limit_low", 5))
+        limit_high = float(cfg.get("limit_high", 97))
+        limit_low = float(cfg.get("limit_low", 0))
     except (TypeError, ValueError):
         return None
 
@@ -254,8 +254,8 @@ def evaluate_recovery(incident: dict, current_status: dict, cfg: dict) -> bool:
 
     try:
         level = float(current_status.get("water_level", -1))
-        limit_high = float(cfg.get("limit_high", 95))
-        limit_low = float(cfg.get("limit_low", 5))
+        limit_high = float(cfg.get("limit_high", 97))
+        limit_low = float(cfg.get("limit_low", 0))
     except (TypeError, ValueError):
         return False
 
@@ -301,4 +301,3 @@ def evaluate_recovery(incident: dict, current_status: dict, cfg: dict) -> bool:
         return status_text == "online"
 
     return False
-
