@@ -444,7 +444,7 @@
     <p class="page-sub">Thiết lập các ngưỡng mực nước, hiệu chỉnh cảm biến và tùy chỉnh tham số hoạt động</p>
     <div class="cfg-info-box">
       <span id="config-source">Đang tải thông số từ ao_nuoc.ino...</span>
-      <button class="btn btn-outline btn-sm" onclick="loadConfig(true)">↻ Lấy thông số từ file</button>
+      <button class="btn btn-outline btn-sm" onclick="loadConfig(true, 'firmware')">↻ Lấy giá trị mặc định từ file</button>
     </div>
 
     <div class="grid-2" style="margin-bottom:16px;">
@@ -465,7 +465,7 @@
               </div>
               <div class="cfg-field">
                 <span class="cfg-field-label">Ngưỡng tắt IN (%)</span>
-                <input type="number" class="form-control" id="cfg-in-off" style="width:80px" min="0" max="100" value="70">
+                <input type="number" class="form-control" id="cfg-in-off" style="width:80px" min="0" max="100" value="60">
               </div>
             </div>
             <div class="pump-cfg-card pump-out-card">
@@ -473,11 +473,11 @@
               <div class="pump-cfg-desc">Tự động bật khi mực nước cao, tắt khi giảm xuống mức an toàn.</div>
               <div class="cfg-field">
                 <span class="cfg-field-label">Ngưỡng bật OUT (%)</span>
-                <input type="number" class="form-control" id="cfg-out-on" style="width:80px" min="0" max="100" value="90">
+                <input type="number" class="form-control" id="cfg-out-on" style="width:80px" min="0" max="100" value="80">
               </div>
               <div class="cfg-field">
                 <span class="cfg-field-label">Ngưỡng tắt OUT (%)</span>
-                <input type="number" class="form-control" id="cfg-out-off" style="width:80px" min="0" max="100" value="80">
+                <input type="number" class="form-control" id="cfg-out-off" style="width:80px" min="0" max="100" value="70">
               </div>
             </div>
           </div>
@@ -596,7 +596,7 @@
           <input type="email" id="cfg-new-email" class="form-control" placeholder="Nhập địa chỉ email người nhận (ví dụ: chu_ao@gmail.com)" style="flex:1; min-width:240px;">
           <input type="text" id="cfg-new-email-name" class="form-control" placeholder="Tên người nhận (ví dụ: Kỹ thuật viên)" style="width:160px;">
           <button class="btn btn-primary" onclick="addEmailRecipient()">➕ Thêm người nhận</button>
-          <button class="btn btn-outline" onclick="sendTestEmail()">✈️ Gửi thử nghiệm</button>
+          <button class="btn btn-outline" onclick="sendTestEmail('cfg-new-email')">✈️ Gửi thử nghiệm</button>
         </div>
         <div class="table-wrap">
           <table>

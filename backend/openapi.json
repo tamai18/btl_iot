@@ -1,0 +1,316 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Hệ thống IoT Ao Nuôi - API",
+    "description": "API giám sát, cấu hình và điều khiển hệ thống IoT ao nuôi. Các API không yêu cầu xác thực.",
+    "version": "1.0.0"
+  },
+  "tags": [
+    { "name": "Giám sát", "description": "Trạng thái thiết bị, dữ liệu cảm biến và phân tích" },
+    { "name": "Điều khiển", "description": "Cấu hình và gửi lệnh điều khiển ESP32" },
+    { "name": "Nhật ký", "description": "Tra cứu lịch sử cảm biến, cảnh báo và lệnh" },
+    { "name": "Chat AI", "description": "Trợ lý hội thoại và xác nhận lệnh" },
+    { "name": "Thông báo email", "description": "Quản lý người nhận và thông báo email" }
+  ],
+  "paths": {
+    "/api/dashboard/insights": {
+      "get": {
+        "tags": ["Giám sát"],
+        "summary": "Phân tích xu hướng và dự báo mực nước",
+        "parameters": [
+          { "name": "demo", "in": "query", "description": "Bật dữ liệu demo khi đặt bằng 1", "schema": { "type": "string", "enum": ["0", "1"], "default": "0" } }
+        ],
+        "responses": { "200": { "$ref": "#/components/responses/JsonResponse" }, "500": { "$ref": "#/components/responses/ErrorResponse" } }
+      }
+    },
+    "/api/status": {
+      "get": {
+        "tags": ["Giám sát"],
+        "summary": "Trạng thái tổng quan hệ thống",
+        "responses": { "200": { "$ref": "#/components/responses/JsonResponse" } }
+      }
+    },
+    "/api/sensor": {
+      "get": {
+        "tags": ["Giám sát"],
+        "summary": "Đọc dữ liệu cảm biến",
+        "description": "Có thể lọc theo khoảng thời gian gần nhất hoặc theo ngày; all=1 để đọc mọi bản ghi theo phân trang.",
+        "parameters": [
+          { "name": "minutes", "in": "query", "schema": { "type": "integer", "default": 30 }, "description": "Khoảng thời gian gần nhất, tính bằng phút" },
+          { "name": "from", "in": "query", "schema": { "type": "string", "format": "date" }, "description": "Ngày bắt đầu YYYY-MM-DD (dùng cùng với to)" },
+          { "name": "to", "in": "query", "schema": { "type": "string", "format": "date" }, "description": "Ngày kết thúc YYYY-MM-DD (dùng cùng với from)" },
+          { "name": "all", "in": "query", "schema": { "type": "string", "enum": ["0", "1"], "default": "0" }, "description": "Đặt bằng 1 để phân trang toàn bộ dữ liệu" },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 500, "maximum": 2000 } },
+          { "name": "page", "in": "query", "schema": { "type": "integer", "default": 1, "minimum": 1 } }
+        ],
+        "responses": { "200": { "$ref": "#/components/responses/JsonResponse" } }
+      }
+    },
+    "/api/alerts": {
+      "get": {
+        "tags": ["Nhật ký"],
+        "summary": "Danh sách cảnh báo",
+        "parameters": [
+          { "name": "severity", "in": "query", "schema": { "type": "string" } },
+          { "name": "status", "in": "query", "schema": { "type": "string" } },
+          { "name": "from", "in": "query", "schema": { "type": "string", "format": "date" } },
+          { "name": "to", "in": "query", "schema": { "type": "string", "format": "date" } },
+          { "name": "recent_hours", "in": "query", "schema": { "type": "number" } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 20, "maximum": 200 } },
+          { "name": "page", "in": "query", "schema": { "type": "integer", "default": 1, "minimum": 1 } }
+        ],
+        "responses": { "200": { "$ref": "#/components/responses/JsonResponse" }, "400": { "$ref": "#/components/responses/ErrorResponse" } }
+      }
+    },
+    "/api/alerts/{alert_id}/resolve": {
+      "post": {
+        "tags": ["Nhật ký"],
+        "summary": "Yêu cầu đánh dấu cảnh báo đã xử lý",
+        "description": "Hiện API không cho phép xử lý thủ công; điều kiện khôi phục được xác nhận tự động.",
+        "parameters": [{ "$ref": "#/components/parameters/AlertId" }],
+        "responses": { "405": { "$ref": "#/components/responses/ErrorResponse" } }
+      }
+    },
+    "/api/control": {
+      "post": {
+        "tags": ["Điều khiển"],
+        "summary": "Gửi lệnh điều khiển xuống ESP32",
+        "description": "Yêu cầu MQTT và ESP32 đang trực tuyến. Các lệnh bật/tắt bơm tác động trực tiếp tới thiết bị.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ControlRequest" },
+              "examples": {
+                "switchMode": { "summary": "Chuyển sang chế độ tự động", "value": { "command": "mode", "payload": "AUTO" } },
+                "pump": { "summary": "Bật bơm cấp", "value": { "command": "pump_in", "payload": "ON" } },
+                "threshold": { "summary": "Cập nhật ngưỡng (inOn,inOff,outOn,outOff)", "value": { "command": "threshold", "payload": "30,50,90,80" } }
+              }
+            }
+          }
+        },
+        "responses": { "200": { "$ref": "#/components/responses/JsonResponse" }, "400": { "$ref": "#/components/responses/ErrorResponse" }, "503": { "$ref": "#/components/responses/ErrorResponse" } }
+      }
+    },
+    "/api/config": {
+      "get": {
+        "tags": ["Điều khiển"],
+        "summary": "Đọc cấu hình hệ thống",
+        "responses": { "200": { "$ref": "#/components/responses/JsonResponse" } }
+      },
+      "post": {
+        "tags": ["Điều khiển"],
+        "summary": "Cập nhật cấu hình hệ thống",
+        "description": "Các khóa cấu hình được lưu vào cơ sở dữ liệu; thay đổi ngưỡng hoặc hiệu chuẩn có thể được gửi tới ESP32.",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ConfigRequest" }, "example": { "in_on_pct": 30, "in_off_pct": 50, "out_off_pct": 80, "out_on_pct": 90 } } } },
+        "responses": { "200": { "$ref": "#/components/responses/JsonResponse" }, "400": { "$ref": "#/components/responses/ErrorResponse" } }
+      }
+    },
+    "/api/logs": {
+      "get": {
+        "tags": ["Nhật ký"],
+        "summary": "Nhật ký hệ thống",
+        "parameters": [
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 50, "maximum": 500 } },
+          { "name": "page", "in": "query", "schema": { "type": "integer", "default": 1, "minimum": 1 } },
+          { "name": "component", "in": "query", "schema": { "type": "string" } },
+          { "name": "level", "in": "query", "schema": { "type": "string" } },
+          { "name": "from", "in": "query", "schema": { "type": "string", "format": "date" } },
+          { "name": "to", "in": "query", "schema": { "type": "string", "format": "date" } }
+        ],
+        "responses": { "200": { "$ref": "#/components/responses/JsonResponse" } }
+      }
+    },
+    "/api/control_logs": {
+      "get": {
+        "tags": ["Nhật ký"],
+        "summary": "Nhật ký lệnh điều khiển",
+        "parameters": [
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 20, "maximum": 200 } },
+          { "name": "page", "in": "query", "schema": { "type": "integer", "default": 1, "minimum": 1 } },
+          { "name": "from", "in": "query", "schema": { "type": "string", "format": "date" } },
+          { "name": "to", "in": "query", "schema": { "type": "string", "format": "date" } },
+          { "name": "device", "in": "query", "schema": { "type": "string", "description": "Bơm cấp (IN), Bơm thoát (OUT), hoặc Chế độ" } }
+        ],
+        "responses": { "200": { "$ref": "#/components/responses/JsonResponse" }, "400": { "$ref": "#/components/responses/ErrorResponse" } }
+      }
+    },
+    "/api/chart": {
+      "get": {
+        "tags": ["Giám sát"],
+        "summary": "Dữ liệu tổng hợp cho biểu đồ",
+        "parameters": [{ "name": "period", "in": "query", "schema": { "type": "string", "enum": ["hour", "day", "week", "month"], "default": "day" } }],
+        "responses": { "200": { "$ref": "#/components/responses/JsonResponse" } }
+      }
+    },
+    "/api/chat": {
+      "post": {
+        "tags": ["Chat AI"],
+        "summary": "Gửi tin nhắn tới trợ lý",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["message"], "properties": { "message": { "type": "string", "example": "Mực nước hiện tại bao nhiêu?" } } } } } },
+        "responses": { "200": { "$ref": "#/components/responses/JsonResponse" }, "500": { "$ref": "#/components/responses/ErrorResponse" } }
+      }
+    },
+    "/api/chat/confirm": {
+      "post": {
+        "tags": ["Chat AI"],
+        "summary": "Xác nhận lệnh điều khiển đang chờ",
+        "requestBody": { "$ref": "#/components/requestBodies/ChatAction" },
+        "responses": { "200": { "$ref": "#/components/responses/JsonResponse" }, "500": { "$ref": "#/components/responses/ErrorResponse" } }
+      }
+    },
+    "/api/chat/cancel": {
+      "post": {
+        "tags": ["Chat AI"],
+        "summary": "Hủy lệnh điều khiển đang chờ",
+        "requestBody": { "$ref": "#/components/requestBodies/ChatAction" },
+        "responses": { "200": { "$ref": "#/components/responses/JsonResponse" }, "500": { "$ref": "#/components/responses/ErrorResponse" } }
+      }
+    },
+    "/api/chat/health": {
+      "get": {
+        "tags": ["Chat AI"],
+        "summary": "Kiểm tra tình trạng dịch vụ chat",
+        "responses": { "200": { "$ref": "#/components/responses/JsonResponse" } }
+      }
+    },
+    "/api/notify/recipients": {
+      "get": {
+        "tags": ["Thông báo email"],
+        "summary": "Danh sách người nhận email",
+        "responses": { "200": { "$ref": "#/components/responses/JsonResponse" } }
+      },
+      "post": {
+        "tags": ["Thông báo email"],
+        "summary": "Thêm hoặc cập nhật người nhận email",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RecipientRequest" }, "example": { "email": "nguoinuoi@example.com", "name": "Chủ ao", "enabled": true } } } },
+        "responses": { "200": { "$ref": "#/components/responses/JsonResponse" }, "400": { "$ref": "#/components/responses/ErrorResponse" } }
+      }
+    },
+    "/api/notify/recipients/{recipient_id}": {
+      "put": {
+        "tags": ["Thông báo email"],
+        "summary": "Cập nhật người nhận email",
+        "parameters": [{ "$ref": "#/components/parameters/RecipientId" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RecipientUpdateRequest" }, "example": { "enabled": false } } } },
+        "responses": { "200": { "$ref": "#/components/responses/JsonResponse" }, "400": { "$ref": "#/components/responses/ErrorResponse" } }
+      },
+      "delete": {
+        "tags": ["Thông báo email"],
+        "summary": "Xóa người nhận email",
+        "parameters": [{ "$ref": "#/components/parameters/RecipientId" }],
+        "responses": { "200": { "$ref": "#/components/responses/JsonResponse" } }
+      }
+    },
+    "/api/notify/settings": {
+      "get": {
+        "tags": ["Thông báo email"],
+        "summary": "Đọc cài đặt thông báo email",
+        "responses": { "200": { "$ref": "#/components/responses/JsonResponse" } }
+      },
+      "post": {
+        "tags": ["Thông báo email"],
+        "summary": "Cập nhật cài đặt thông báo email",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/NotifySettingsRequest" }, "example": { "mail_enabled": true, "recipient_default": "nguoinuoi@example.com" } } } },
+        "responses": { "200": { "$ref": "#/components/responses/JsonResponse" }, "500": { "$ref": "#/components/responses/ErrorResponse" } }
+      }
+    },
+    "/api/notify/test": {
+      "post": {
+        "tags": ["Thông báo email"],
+        "summary": "Gửi email thử nghiệm",
+        "description": "Gửi email thật qua SMTP. Nếu không truyền email, hệ thống chọn người nhận đang bật.",
+        "requestBody": { "content": { "application/json": { "schema": { "type": "object", "properties": { "email": { "type": "string", "format": "email" } } }, "example": { "email": "nguoinuoi@example.com" } } } },
+        "responses": { "200": { "$ref": "#/components/responses/JsonResponse" }, "400": { "$ref": "#/components/responses/ErrorResponse" }, "502": { "$ref": "#/components/responses/ErrorResponse" } }
+      }
+    },
+    "/api/notify/logs": {
+      "get": {
+        "tags": ["Thông báo email"],
+        "summary": "Nhật ký gửi email",
+        "parameters": [
+          { "name": "page", "in": "query", "schema": { "type": "integer", "default": 1, "minimum": 1 } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 20, "maximum": 100 } }
+        ],
+        "responses": { "200": { "$ref": "#/components/responses/JsonResponse" }, "500": { "$ref": "#/components/responses/ErrorResponse" } }
+      }
+    },
+    "/api/notify/incidents": {
+      "get": {
+        "tags": ["Thông báo email"],
+        "summary": "Danh sách sự cố thông báo",
+        "parameters": [{ "name": "status", "in": "query", "schema": { "type": "string" } }],
+        "responses": { "200": { "$ref": "#/components/responses/JsonResponse" }, "500": { "$ref": "#/components/responses/ErrorResponse" } }
+      }
+    }
+  },
+  "components": {
+    "parameters": {
+      "AlertId": { "name": "alert_id", "in": "path", "required": true, "schema": { "type": "integer" } },
+      "RecipientId": { "name": "recipient_id", "in": "path", "required": true, "schema": { "type": "integer" } }
+    },
+    "requestBodies": {
+      "ChatAction": {
+        "content": { "application/json": { "schema": { "type": "object", "properties": { "action_id": { "type": "string", "description": "ID hành động đang chờ xác nhận (không bắt buộc)" } } }, "example": { "action_id": "pending-action-id" } } }
+      }
+    },
+    "responses": {
+      "JsonResponse": { "description": "Phản hồi JSON của API", "content": { "application/json": { "schema": { "type": "object", "additionalProperties": true } } } },
+      "ErrorResponse": { "description": "Yêu cầu không thành công", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "ok": { "type": "boolean", "example": false },
+          "error": { "type": "string" }
+        }
+      },
+      "ControlRequest": {
+        "type": "object",
+        "required": ["command"],
+        "properties": {
+          "command": { "type": "string", "enum": ["mode", "pump_in", "pump_out", "threshold", "calib", "calib_empty", "calib_full", "reset", "get", "restart"] },
+          "payload": { "type": "string", "description": "Giá trị lệnh. Ví dụ: AUTO, ON, 30,50,90,80 hoặc 100,10" }
+        }
+      },
+      "ConfigRequest": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "in_on_pct": { "type": "number", "description": "Ngưỡng bật bơm cấp (%)" },
+          "in_off_pct": { "type": "number", "description": "Ngưỡng tắt bơm cấp (%)" },
+          "out_off_pct": { "type": "number", "description": "Ngưỡng tắt bơm thoát (%)" },
+          "out_on_pct": { "type": "number", "description": "Ngưỡng bật bơm thoát (%)" },
+          "d_empty": { "type": "number", "description": "Khoảng cách khi ao cạn (cm)" },
+          "d_full": { "type": "number", "description": "Khoảng cách khi ao đầy (cm)" }
+        }
+      },
+      "RecipientRequest": {
+        "type": "object",
+        "required": ["email"],
+        "properties": {
+          "email": { "type": "string", "format": "email" },
+          "name": { "type": "string", "default": "Người nuôi cá" },
+          "enabled": { "type": "boolean", "default": true }
+        }
+      },
+      "RecipientUpdateRequest": {
+        "type": "object",
+        "properties": {
+          "email": { "type": "string", "format": "email" },
+          "name": { "type": "string" },
+          "enabled": { "type": "boolean" }
+        }
+      },
+      "NotifySettingsRequest": {
+        "type": "object",
+        "properties": {
+          "mail_enabled": { "type": "boolean" },
+          "recipient_default": { "type": "string", "format": "email" },
+          "email": { "type": "string", "format": "email", "description": "Tên thay thế cho recipient_default" }
+        }
+      }
+    }
+  }
+}

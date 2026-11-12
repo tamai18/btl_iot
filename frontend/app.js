@@ -11,6 +11,7 @@ let configCache = {};
 let configSource = 'firmware';
 let configLoading = false;
 const configFieldValues = {};
+let emailAlertLoadedValue = null;
 
 // ── Navigation ────────────────────────────────────────────────────────────────
 function navigate(page) {
@@ -1435,7 +1436,7 @@ async function loadControlLogsTable(page = ctrlLogPage) {
 // ══════════════════════════════════════════════════════════════════════════════
 //  PAGE 4: CẤU HÌNH
 // ══════════════════════════════════════════════════════════════════════════════
-async function loadConfig(showToast = false, source = 'firmware', background = false) {
+async function loadConfig(showToast = false, source = 'server', background = false) {
   if (background && configLoading) return;
   configLoading = true;
   configSource = source;
@@ -1455,10 +1456,15 @@ async function loadConfig(showToast = false, source = 'firmware', background = f
     const runtimeConfig = data.runtime_config || {};
     configCache = cfg;
     const reported = data.esp32_reported || {};
-    const value = (key, reportedKey, fallback) =>
-      source === 'esp32'
-        ? reported[reportedKey] ?? defaults[key] ?? cfg[key] ?? fallback
-        : defaults[key] ?? cfg[key] ?? fallback;
+    const value = (key, reportedKey, fallback) => {
+      if (source === 'esp32') {
+        return reported[reportedKey] ?? cfg[key] ?? defaults[key] ?? fallback;
+      }
+      if (source === 'firmware') {
+        return defaults[key] ?? cfg[key] ?? fallback;
+      }
+      return cfg[key] ?? defaults[key] ?? fallback;
+    };
 
     setConfigVal('cfg-in-on',      value('in_on_pct', 'inOn', 30));
     setConfigVal('cfg-in-off',     value('in_off_pct', 'inOff', 70));
@@ -1474,8 +1480,10 @@ async function loadConfig(showToast = false, source = 'firmware', background = f
     setConfigVal('cfg-mqtt-port', defaults.mqtt_port ?? runtimeConfig.mqtt_port ?? cfg.mqtt_port ?? 1883);
     setConfigVal('cfg-topic-prefix', defaults.topic_prefix ?? runtimeConfig.topic_prefix ?? cfg.topic_prefix ?? 'iot');
     setText('config-source', source === 'esp32'
-      ? 'Đang xem cấu hình ESP32 báo về; mục chưa được thiết bị báo về lấy từ file hoặc máy chủ.'
-      : 'Thông số lấy từ ao_nuoc.ino, tự cập nhật mỗi 5 giây sau khi lưu file. Ô đang sửa được giữ nguyên. Các mục chưa khai báo trong file lấy từ máy chủ.');
+      ? 'Đang xem cấu hình ESP32 báo về; mục chưa được thiết bị báo về lấy từ máy chủ hoặc file mặc định.'
+      : source === 'firmware'
+        ? 'Đang xem giá trị mặc định trong ao_nuoc.ino; các mục chưa khai báo lấy từ máy chủ.'
+        : 'Đang xem cấu hình đã lưu trên máy chủ; mục chưa lưu lấy giá trị mặc định từ ao_nuoc.ino.');
 
     // Tải cấu hình cảnh báo email & danh sách người nhận
     if (!background) {
@@ -1935,7 +1943,12 @@ async function loadEmailAlertWidget() {
 
       const ovInput = document.getElementById('email-alert-input');
       if (ovInput && s.recipient_default) {
-        ovInput.value = s.recipient_default;
+        const currentValue = ovInput.value.trim();
+        if (ovInput !== document.activeElement &&
+            (emailAlertLoadedValue === null || currentValue === emailAlertLoadedValue)) {
+          ovInput.value = s.recipient_default;
+        }
+        emailAlertLoadedValue = s.recipient_default;
       }
     }
   } catch (err) {
@@ -1963,6 +1976,7 @@ async function saveEmailAlert() {
       mail_enabled: enabled,
       recipient_default: email,
     });
+    emailAlertLoadedValue = email;
     toast('💾 Đã lưu cấu hình email nhận cảnh báo thành công!', 'success');
   } catch (err) {
     toast(`❌ Lỗi lưu email: ${err.message || 'Không thể lưu'}`, 'error');
@@ -1971,10 +1985,9 @@ async function saveEmailAlert() {
   }
 }
 
-async function sendTestEmail() {
-  const ovInput = document.getElementById('email-alert-input');
-  const cfgInput = document.getElementById('cfg-new-email');
-  const email = ((ovInput && ovInput.value) || (cfgInput && cfgInput.value) || '').trim();
+async function sendTestEmail(inputId = 'email-alert-input') {
+  const selectedInput = document.getElementById(inputId);
+  const email = (selectedInput && selectedInput.value || '').trim();
 
   if (!email || !email.includes('@')) {
     toast('❌ Vui lòng nhập địa chỉ email cần gửi thử', 'warning');

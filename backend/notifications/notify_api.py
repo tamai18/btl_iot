@@ -112,12 +112,21 @@ def email_settings():
         cfg = get_system_config_dict()
         smtp_cfg = get_mailer_config()
 
-        # Lấy email mặc định từ recipients hoặc system_config
+        # Keep the explicitly saved default stable even when older recipients
+        # appear first in the recipient list.
         first_recipient = db.execute(
             "SELECT email FROM notification_recipients WHERE enabled = 1 ORDER BY id ASC LIMIT 1",
             fetch="one"
         )
-        default_email = first_recipient["email"] if first_recipient else cfg.get("mail_recipient_default", "nguoinuoi@example.com")
+        configured_email = cfg.get("mail_recipient_default")
+        if configured_email and configured_email != "nguoinuoi@example.com":
+            default_email = configured_email
+        else:
+            default_email = (
+                first_recipient["email"]
+                if first_recipient
+                else configured_email or "nguoinuoi@example.com"
+            )
 
         return jsonify({
             "ok": True,
@@ -263,4 +272,3 @@ def get_incidents():
     except Exception as e:
         logger.error(f"[NotifyAPI] Lỗi lấy danh sách incidents: {e}")
         return jsonify({"ok": False, "error": str(e)}), 500
-
